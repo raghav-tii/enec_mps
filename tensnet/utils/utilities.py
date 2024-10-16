@@ -6,8 +6,6 @@ from warnings import warn
 import opt_einsum as oe
 import torch
 
-# torch._dynamo.reset()
-
 from .config import ARCH_2D, parameters, device
 
 
@@ -42,19 +40,6 @@ def svd(M: torch.Tensor, eps: float = None, bdmax: int = None):
         bd = len(S) if bdmax is None else min(len(S), bdmax)
     return U[:, :bd], S[:bd], V[:bd, :]
 
-
-# @torch.compile(dynamic=True)
-def svd_3dwrap(tensor, full_matrices):
-    U, S, V = torch.linalg.svd(tensor[0], full_matrices=full_matrices)
-    Uf = torch.unsqueeze(U, dim=0)
-    Sf = torch.unsqueeze(S, dim=0)
-    Vf = torch.unsqueeze(V, dim=0)
-    for i in range(1, tensor.shape[0]):
-        U, S, V = torch.linalg.svd(tensor[i], full_matrices=full_matrices)
-        Uf = torch.cat((Uf, torch.unsqueeze(U, dim=0)))
-        Sf = torch.cat((Sf, torch.unsqueeze(S, dim=0)))
-        Vf = torch.cat((Vf, torch.unsqueeze(V, dim=0)))
-    return Uf, Sf, Vf
 
 
 # @torch.compile(dynamic=True)
@@ -97,7 +82,7 @@ def conjgrad(A, b, x=None):
 
     for i in range(len(b)):
         Ap = A @ p
-        alpha = rsold / p.T @ Ap
+        alpha = rsold / (p.T @ Ap)
         x = x + alpha * p
         r = r - alpha * Ap
         rsnew = r.T @ r
@@ -125,7 +110,7 @@ def direct_solver(A, b):
 def eigen_solver(A, k=1, maximize=False):
     """
     A function to solve [A]{x} = l{x} eigenvalue problem with the
-    built-in scipy method. Redirects to a 'LAPACK' call.
+    built-in method. Redirects to a 'LAPACK' call.
     ========== Parameters ==========
     A : matrix
     b : vector

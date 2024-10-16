@@ -16,16 +16,6 @@ def mask_clean(x, y, flag):
     return values
 
 
-# def plot_ux_uy(ux, uy, d=2, L=8):
-#     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
-#     ux_ans = ux.contract().reshape(d**L, d**L).T
-#     uy_ans = uy.contract().reshape(d**L, d**L).T
-#     p0 = ax[0].imshow(ux_ans, aspect="equal")
-#     plt.colorbar(p0, ax=ax[0])
-#     p1 = ax[1].imshow(uy_ans, aspect="equal")
-#     plt.colorbar(p1, ax=ax[1])
-#     plt.show()
-
 
 def plot_ux_uy_rect(
     ux, uy, startx=0, stopx=None, starty=0, stopy=None, d=2, L=[9, 8], title=None
@@ -33,8 +23,6 @@ def plot_ux_uy_rect(
     fig, ax = plt.subplots(2, 1, figsize=(8, 8))
     ux_ans = ux.contract().reshape(d ** L[0], d ** L[1]).T
     uy_ans = uy.contract().reshape(d ** L[0], d ** L[1]).T
-    # ux_ans = np.roll(ux_ans,(d**(L[1]-2),0),(0,1))
-    # uy_ans = np.roll(uy_ans,(d**(L[1]-2),0),(0,1))
     p0 = ax[0].imshow(ux_ans[starty:stopy, startx:stopx].numpy(), aspect="equal")
     ax[0].set_xlabel(r"$V_x$")
     plt.colorbar(p0, ax=ax[0])
@@ -44,44 +32,6 @@ def plot_ux_uy_rect(
     if title:
         plt.suptitle(title)
     plt.show()
-
-
-# def plot_streamlines(
-#     ux1, uy1, start=0, stop=None, y_offset=None, density=3, lw=1, d=2, L=8, flag=0
-# ):
-#     X, Y = np.meshgrid(
-#         np.linspace(parameters("a"), parameters("b"), d**L),
-#         np.linspace(parameters("a"), parameters("b"), d**L),
-#     )
-#     matrix_clean = mask_clean(X, Y, flag)[
-#         start + y_offset : stop + y_offset, start:stop
-#     ]
-#     fig, ax = plt.subplots(figsize=(10, 10))
-#     plt.xlabel("X-axis")
-#     plt.ylabel("Y-axis")
-#     x_v = X[start + y_offset : stop + y_offset, start:stop]
-#     y_v = Y[start + y_offset : stop + y_offset, start:stop]
-#     ux_ans = ux1.contract().reshape(d**L, d**L).T
-#     uy_ans = uy1.contract().reshape(d**L, d**L).T
-#     ux_ans = ux_ans[start + y_offset : stop + y_offset, start:stop]
-#     uy_ans = uy_ans[start + y_offset : stop + y_offset, start:stop]
-#     u_mag = np.sqrt(ux_ans**2 + uy_ans**2)
-#     ux_ans[matrix_clean] = np.nan
-#     uy_ans[matrix_clean] = np.nan
-#     ax.streamplot(
-#         x_v,
-#         y_v,
-#         ux_ans,
-#         uy_ans,
-#         color=u_mag,
-#         cmap="plasma",
-#         density=density,
-#         linewidth=lw,
-#         broken_streamlines=False,
-#         arrowstyle="-",
-#     )
-#     ax.set_aspect("equal")
-#     plt.show()
 
 
 def plot_streamlines_rect(

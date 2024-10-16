@@ -449,40 +449,38 @@ class MPS:
                 left_nodes + [node] + transform_nodes.nodes + right_nodes
             )
 
+
     def average(self, site_indices: Union[int, list] = None):
-        raise NotImplementedError()
-        # mps = self.copy()
-        # if site_indices == -1:
-        #     average = MPS([x.average() for x in mps])
-        # else:
-        #     average = MPS(
-        #         [
-        #             x.average() if ix in site_indices else x.copy()
-        #             for ix, x in enumerate(mps)
-        #         ]
-        #     )
-        # for j, node in enumerate(self):
-        #     if node.order == 2:
-        #         if node.boundary == "left":
-        #             mps.append(
-        #                 MPS_Node(
-        #                     node.contract(
-        #                         self[j + 1], einstr=["l e, e d r-> l d r", "... -> ..."]
-        #                     )
-        #                 )
-        #             )
-        #         else:
-        #             mps[-1] = MPS_Node(
-        #                 node.contract(
-        #                     self[j - 1], einstr=["e r, l d e-> l d r", "... -> ..."]
-        #                 )
-        #             )
-        #     else:
-        #         mps.append(self[j])
-        # for j, node in enumerate(mps):
-        #     if node.shape == 2:
-        #         mps.nodes.pop(j)
-        # return average
+        nodes = self.copy().nodes
+
+        if site_indices == -1:
+            average = nodes[0].average().tensor
+            for node in nodes:
+                average = einsum(average, node.average().tensor, "l b, b r->l r")
+            return average
+
+        if isinstance(site_indices, int):
+            site_indices = [site_indices]
+
+        for ix in site_indices:
+            node = nodes[ix]
+            average = node.average()
+
+            if ix != len(nodes) - 1:
+                new_tensor = average.contract(
+                    nodes[ix + 1], ["l b, b d r-> l d r", "l d r->l d r"]
+                )
+                nodes[ix + 1] = MPS_Node(new_tensor)
+            else:
+                new_tensor = average.contract(
+                    nodes[ix - 1], ["b r, l d b-> l d r", "l d r->l d r"]
+                )
+                nodes[ix - 1] = MPS_Node(new_tensor)
+
+        for ix in site_indices:
+            del nodes[ix]
+
+        return MPS(nodes)
 
     def conj(self):
         nodes = [node.conj() for node in self]
@@ -587,7 +585,6 @@ class MPS:
         return self @ other
 
     def partial_inner_prod(self):
-        # TODO Use opt_einsum here.
         raise DeprecationWarning()
 
     def schmidt_coeffs(self):
