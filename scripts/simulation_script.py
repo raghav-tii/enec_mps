@@ -1,8 +1,25 @@
 from datetime import datetime
+import numpy as np
+import torch
 import os
 import sys
 
-from tensnet import *
+sys.path.append("..")
+
+from tensnet import (
+    set_accuracy,
+    set_bd_limit,
+    load_object,
+    save_object,
+    set_param,
+    modify_2inputs,
+    cross_approximation,
+    euler_time_stepping,
+    COMP_ACC,
+    BD_LIMIT,
+    parameters,
+    identity_mps,
+)
 
 if len(sys.argv) == 8:
     ux_val = float(sys.argv[1])
@@ -16,8 +33,8 @@ else:
     raise AssertionError("Please provide all arguments as specified in README.md")
 
 # %%
-flag_init_conds = False # Set to true if initial conditions are provided to overrite the default ones.
-d = 2 #Currenltly only 2d simulation are supported
+flag_init_conds = False  # Set to true if initial conditions are provided to overrite the default ones.
+d = 2  # Currenltly only 2d simulation are supported
 ax = 0.0
 ay = 0.0
 bx = 8.0
@@ -25,7 +42,12 @@ by = 4.0
 rad = 0.15
 Re = np.round(ux_val * 2 * rad / nu)
 
-if object == "square" or object == "squares" or object == "wing" or object == "wing_incl":
+if (
+    object == "square"
+    or object == "squares"
+    or object == "wing"
+    or object == "wing_incl"
+):
     ax = -2.0
     bx = 6.0
     ay = -2.0
@@ -66,14 +88,14 @@ set_param("low_acc", False)
 cfl_cond = ux_val * dt / dx
 int_Re = int(Re)
 
+
 # %%
 def circle(x, y):
-    l = rad
     # Be careful with the domain. Function support should be btw 0 and 4.
     if object == "new":
-        values = (x - bx / 16) ** 2 + (y - by / 2) ** 2 - l**2
+        values = (x - bx / 16) ** 2 + (y - by / 2) ** 2 - rad**2
     else:
-        values = (x - bx / 8) ** 2 + (y - by / 2) ** 2 - l**2
+        values = (x - bx / 8) ** 2 + (y - by / 2) ** 2 - rad**2
     values += torch.abs(values)
     return values
 
@@ -128,7 +150,9 @@ def mask(x, y):
     elif object == "circle":
         values = 1 - torch.exp(-1e3 * circle(x, y))
     else:
-        raise RuntimeError("Expected the immersed object to be among {square,squares, wing, wing_incl or circle}")
+        raise RuntimeError(
+            "Expected the immersed object to be among {square,squares, wing, wing_incl or circle}"
+        )
     return values
 
 
@@ -152,14 +176,13 @@ params = {
     "dt": dt,
     "low_acc": parameters("low_acc"),
     "ResumeInit": flag_init_conds
-    and os.path.exists(dirpath + f"../data/{object}initcondx_{Lx+Ly}_{int(Re)}.mps"),
+    and os.path.exists(f"../data/{object}initcondx_{Lx+Ly}_{int(Re)}.mps"),
     "new_mask": object,
     "mask": mask_mps,
     "ux_val": ux_val,
     "visc": nu,
     "DMRG_Threshold": opt_acc,
     "DMRG_maxSweeps": opt_iter,
-    "visc": nu,
     "Timesteps": N,
     "UID": var,
     "config": parameters(),
@@ -169,7 +192,10 @@ params = {
 
 save_object(params, f"../results/param_{var}.pfile")
 # %% Initial Conditions
-if os.path.exists(f"../data/{object}initcondx_{Lx+Ly}_{int_Re}.mps") and flag_init_conds:
+if (
+    os.path.exists(f"../data/{object}initcondx_{Lx+Ly}_{int_Re}.mps")
+    and flag_init_conds
+):
     ux = load_object(f"../data/{object}initcondx_{Lx+Ly}_{int_Re}.mps")
     uy = load_object(f"../data/{object}initcondy_{Lx+Ly}_{int_Re}.mps")
 else:
