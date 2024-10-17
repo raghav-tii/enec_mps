@@ -1,3 +1,3 @@
 !#bin/bash
 
-python simulations.py
+python simulation_script.py 1.5 10 3e-3 2e-3 circle 8 7

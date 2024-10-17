@@ -50,11 +50,11 @@ Required Libraries:
     ```bash
     # For Linux/MacOS
     python3 -m venv <name_of_venv>
-    source name_of_venv/bin/activate
+    source <name_of_venv>/bin/activate
 
     # For Windows
-    python -m venv venv
-    venv\Scripts\activate
+    python -m venv <name_of_venv>
+    <name_of_venv>\Scripts\activate
     ```
 
 3. Install dependencies:

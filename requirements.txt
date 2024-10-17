@@ -1,0 +1,16 @@
+# Core dependencies
+numpy
+scipy
+tqdm
+matplotlib >= 3.6.0
+torch
+# mandatory libs for functionality
+einops
+tntorch
+opt_einsum
+cotengra
+teneva
+
+# optional libs (Manual installation needed)
+# maxvolpy
+# kahypar
