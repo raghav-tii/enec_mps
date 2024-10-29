@@ -157,9 +157,8 @@ def mask(x, y):
 
 
 # %%
-
 mask_mps = cross_approximation(
-    function=mask, nofq=Lx + Ly, pd=2, eps=1e-6, max_iter=100
+    function=mask, nofq=Lx + Ly, pd=2, eps=1e-6,max_rank=100, max_iter=100
 )
 mask_mps.compress(accuracy=eps, max_bd=None)
 # %%
