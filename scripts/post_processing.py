@@ -8,17 +8,17 @@ from tqdm import tqdm
 torch.set_default_dtype(torch.float64)
 # %%
 UID = None
-params = tt.load_object(f"../results/param_{UID}.pfile")
+params = tt.load_object(f"../data/results/param_{UID}.pfile")
 
-if os.path.exists(f"../results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"):
+if os.path.exists(f"../data/results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"):
     (velx, vely, pressure) = tt.load_object(
-        f"../results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"
+        f"../data/results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"
     )
 else:
-    (velx, vely, pressure) = tt.load_object(f"../results/temp/{UID}_int_sol_{0}.tmp")
+    (velx, vely, pressure) = tt.load_object(f"../data/results/temp/{UID}_int_sol_{0}.tmp")
     for i in range(1, 2):
         (solx1, soly1, solp1) = tt.load_object(
-            f"../results/temp/{UID}_int_sol_{100*i}.tmp"
+            f"../data/results/temp/{UID}_int_sol_{100*i}.tmp"
         )
         velx += solx1
         vely += soly1
@@ -54,27 +54,28 @@ mask_mps.compress(accuracy=eps, max_bd=None)
 print(mask_mps)
 cleanmask = torch.round(1 - mask_mps.contract().reshape(d**Lx, d**Ly).T) == 1.0
 # %%
-ux = velx[-1]
-uy = vely[-1]
+timestep = -1
+ux = velx[timestep]
+uy = vely[timestep]
 
 tt.plot_ux_uy_rect(ux, uy, L=L)
 # %%
-# %% ENERGY CONSERVATION CHECK.
-Emean = []
-TEmean = []
-vymean = torch.zeros_like(velx[0].contract())
-vxmean = torch.ones_like(vely[0].contract()) * params["ux_val"]
+# # %% ENERGY CONSERVATION CHECK.
+# Emean = []
+# TEmean = []
+# vymean = torch.zeros_like(velx[0].contract())
+# vxmean = torch.ones_like(vely[0].contract()) * params["ux_val"]
 
-for mpsx, mpsy in zip(tqdm(velx), tqdm(vely)):
-    ux = mpsx.contract()
-    uy = mpsy.contract()
-    uxd = ux**2 - vxmean**2
-    uyd = uy**2 - vymean**2
-    Emean.append(0.5 * torch.mean(ux**2 + uy**2))
-    TEmean.append(0.5 * torch.mean(uxd + uyd))
-# %%
-Emean = torch.tensor(Emean)
-plt.plot(Emean.numpy())
-print(Emean.mean(), "+-", Emean.std())
-# %%
-plt.plot(TEmean)
+# for mpsx, mpsy in zip(tqdm(velx), tqdm(vely)):
+#     ux = mpsx.contract()
+#     uy = mpsy.contract()
+#     uxd = ux**2 - vxmean**2
+#     uyd = uy**2 - vymean**2
+#     Emean.append(0.5 * torch.mean(ux**2 + uy**2))
+#     TEmean.append(0.5 * torch.mean(uxd + uyd))
+# # %%
+# Emean = torch.tensor(Emean)
+# plt.plot(Emean.numpy())
+# print(Emean.mean(), "+-", Emean.std())
+# # %%
+# plt.plot(TEmean)
