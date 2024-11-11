@@ -157,7 +157,7 @@ def euler_time_stepping(
     saveit=None,
     UID=None,
     verbose=False,
-    ret_times=True,
+    ret_times=False,
     inv_mpo=None,
 ):
     if bdtrunc:

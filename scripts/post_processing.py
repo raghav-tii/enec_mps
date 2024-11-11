@@ -18,7 +18,7 @@ params = tt.load_object(f"../data/results/param_{UID}.pfile")
 if os.path.exists(
     f"../data/results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"
 ):
-    (velx, vely, pressure) = tt.load_object(
+    results = tt.load_object(
         f"../data/results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"
     )
 else:
@@ -33,6 +33,10 @@ else:
         vely += soly1
         pressure += solp1
 
+if len(results) == 4:
+    velx, vely, pressure, _ = results
+elif len(results) == 3:
+    velx, vely, pressure = results
 
 # %%
 ax = 0.0
