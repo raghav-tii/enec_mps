@@ -189,7 +189,7 @@ params = {
     "comp_acc": COMP_ACC(),
 }
 
-save_object(params, f"../results/param_{var}.pfile")
+save_object(params, f"../data/results/param_{var}.pfile")
 # %% Initial Conditions
 if (
     os.path.exists(f"../data/{object}initcondx_{Lx+Ly}_{int_Re}.mps")
@@ -216,10 +216,9 @@ solution = euler_time_stepping(
     opt_accuracy=opt_acc,
     opt_iter=opt_iter,
     opt_paths_iter=100,
-    scheme=timestep_scheme,
     saveit=None,
     UID=var,
 )
 
 
-save_object(solution, f"../results/Re_{int(Re)}_{method}_{var}.mpssol")
+save_object(solution, f"../data/results/Re_{int(Re)}_{method}_{var}.mpssol")
