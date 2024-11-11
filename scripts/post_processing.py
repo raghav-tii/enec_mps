@@ -1,4 +1,9 @@
 # %%
+import sys
+
+sys.path.append("..")
+
+# %%
 import os
 import tensnet as tt
 import torch
@@ -10,12 +15,16 @@ torch.set_default_dtype(torch.float64)
 UID = None
 params = tt.load_object(f"../data/results/param_{UID}.pfile")
 
-if os.path.exists(f"../data/results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"):
+if os.path.exists(
+    f"../data/results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"
+):
     (velx, vely, pressure) = tt.load_object(
         f"../data/results/Re_{int(params['Re'])}_{params['method']}_{UID}.mpssol"
     )
 else:
-    (velx, vely, pressure) = tt.load_object(f"../data/results/temp/{UID}_int_sol_{0}.tmp")
+    (velx, vely, pressure) = tt.load_object(
+        f"../data/results/temp/{UID}_int_sol_{0}.tmp"
+    )
     for i in range(1, 2):
         (solx1, soly1, solp1) = tt.load_object(
             f"../data/results/temp/{UID}_int_sol_{100*i}.tmp"
