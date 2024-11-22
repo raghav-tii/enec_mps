@@ -34,6 +34,22 @@ def plot_ux_uy_rect(
     plt.show()
 
 
+def plot_pressure_rect(
+    ux, uy, startx=0, stopx=None, starty=0, stopy=None, d=2, L=[9, 8], title=None
+):
+    fig, ax = plt.subplots(2, 1, figsize=(8, 8))
+    ux_ans = ux.contract().reshape(d ** L[0], d ** L[1]).T
+    uy_ans = uy.contract().reshape(d ** L[0], d ** L[1]).T
+    p0 = ax[0].imshow(ux_ans[starty:stopy, startx:stopx].numpy(), aspect="equal")
+    ax[0].set_xlabel(r"$pressure$")
+    plt.colorbar(p0, ax=ax[0])
+    p1 = ax[1].imshow(uy_ans[starty:stopy, startx:stopx].numpy(), aspect="equal")
+    ax[1].set_xlabel(r"$error$")
+    plt.colorbar(p1, ax=ax[1])
+    if title:
+        plt.suptitle(title)
+    plt.show()
+
 def plot_streamlines_rect(
     ux1,
     uy1,

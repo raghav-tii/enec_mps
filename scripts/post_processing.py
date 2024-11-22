@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 torch.set_default_dtype(torch.float64)
 # %%
-UID = None
+UID = 1732186808 #None
 params = tt.load_object(f"../data/results/param_{UID}.pfile")
 
 if os.path.exists(
@@ -70,8 +70,16 @@ cleanmask = torch.round(1 - mask_mps.contract().reshape(d**Lx, d**Ly).T) == 1.0
 timestep = -1
 ux = velx[timestep]
 uy = vely[timestep]
-
-tt.plot_ux_uy_rect(ux, uy, L=L)
+###################################
+print(len(velx))
+print(len(vely))
+print(len(pressure))
+p  = pressure[timestep]
+p_ex = uy
+error = p + uy*-1.0
+tt.plot_pressure_rect(p, error, L=L)
+###################################
+# tt.plot_ux_uy_rect(ux, uy, L=L)
 # %%
 # # %% ENERGY CONSERVATION CHECK.
 # Emean = []

@@ -409,3 +409,163 @@ def time_stepping_multiiter(
         return solx, soly, error, divergence
 
     return solx, soly
+
+def Poisson(
+    ux: MPS,
+    uy: MPS,
+    nofq: list[int],
+    dt: float,
+    N: int,
+    nu,
+    dx: float = None,
+    dy: float = None,
+    mask: MPS = None,
+    opt_method="dmrg2",
+    opt_accuracy=1e-6,
+    opt_iter=6,
+    opt_paths_iter=100,
+    bdtrunc=None,
+    saveit=None,
+    UID=None,
+    verbose=False,
+    ret_times=False,
+    inv_mpo=None,
+):
+    if bdtrunc:
+        bdtruncp = bdtrunc
+    else:
+        bdtruncp = int(30)
+
+    if isinstance(nofq, int):
+        nofq = [nofq, nofq]
+
+    if dx is None:
+        dx = parameters("bx") - parameters("ax")
+        dx /= (2 ** nofq[0]) - 1
+    if dy is None:
+        dy = parameters("by") - parameters("ay")
+        dy /= (2 ** nofq[1]) - 1
+
+    phiout = identity_mps(sum(nofq)) * 1.0 * dt
+    phi_temp = None
+
+    bcv = ["dirichlet", "neumann", "periodic", "periodic"]
+    bcp = ["dirichlet", "dirichlet", "dirichlet", "dirichlet"]
+
+    Dxp = get_diff_mpo(dim=2, order=1, axis=0, nofq=nofq, bc=bcp) * (1.0 / dx)
+    Dyp = get_diff_mpo(dim=2, order=1, axis=1, nofq=nofq, bc=bcp) * (1.0 / dy)
+    Dxx = get_diff_mpo(dim=2, order=2, axis=0, nofq=nofq, bc=bcp) * (1.0 / dx**2)
+    Dyy = get_diff_mpo(dim=2, order=2, axis=1, nofq=nofq, bc=bcp) * (1.0 / dy**2)
+
+    Dx1 = get_diff_mpo(dim=2, order=1, axis=0, bc=bcv) * (1.0 / dx)
+    Dy1 = get_diff_mpo(dim=2, order=1, axis=1, bc=bcv) * (1.0 / dy)
+    Dxx1 = get_diff_mpo(dim=2, order=2, axis=0, bc=bcv) * (1.0 / dx**2)
+    Dyy1 = get_diff_mpo(dim=2, order=2, axis=1, bc=bcv) * (1.0 / dy**2)
+
+    _, rbop2 = get_dirichlet_correction(2, nofq=nofq, axis=0)
+    rbop2 = rbop2 * (1.0 / dx**2)
+    _, rbop1 = get_dirichlet_correction(1, nofq=nofq, axis=0)
+    rbop1 = rbop1 * (1.0 / dx**1)
+
+    A = Dxx + Dyy
+
+    if mask is None:
+        mask = identity_mps(L=len(ux))
+    solx = [ux]
+    soly = [uy]
+    solp = []
+    # b = get_2d_divergence(solx[-1], soly[-1], Dx1, Dy1, nofq, bcv)
+    # if bcp[1] == "dirichlet":
+    #     b = b + rbop2.apply(phiout) * -1.0
+    b = ux
+
+    error = []
+
+    if "dmrg" in opt_method:
+        dmrg_sites = int(opt_method[-1])
+
+    times = []
+    for i in tqdm(range(N)):
+        _opt_flag = False
+        if i % opt_paths_iter == 0:
+            _opt_flag = True
+
+        start = time.time()
+
+        if "dmrg" in opt_method:
+            phi = linsystem_solver(
+                A=A,
+                b=b,
+                x=phi_temp,
+                max_iter=opt_iter,
+                max_rank=bdtruncp,
+                eps=opt_accuracy,
+                dmrg_sites=dmrg_sites,
+                opt_paths=_opt_flag,
+                verbose=verbose,
+            )
+            if verbose:
+                error.append(phi[1])
+                phi = phi[0]
+
+        vxp = solx[-1] + Dxp.apply(phi) * (-1.0)
+
+        if bcp[1] == "dirichlet":
+            vxp = vxp + rbop1.apply(phiout) * -1.0
+        vxp = vxp * mask
+
+        vyp = (Dyp.apply(phi) * (-1.0) + soly[-1]) * mask
+
+        vxp.compress(max_bd=bdtrunc)
+        vyp.compress(max_bd=bdtrunc)
+
+        solx[-1] = vxp.copy()
+        soly[-1] = vyp.copy()
+
+        vx, vy = vel_predictor(
+            solx[-1],
+            soly[-1],
+            nofq,
+            nu,
+            dt,
+            Dx1,
+            Dy1,
+            Dxx1,
+            Dyy1,
+            bc=bcv,
+            ret_comps=True,
+        )
+
+        solp.append(phi * (1.0 / dt))
+        solx.append(vx)
+        soly.append(vy)
+
+        stop = time.time()
+
+        times.append(stop - start)
+
+        if bcp[1] == "dirichlet":
+            b = b + rbop2.apply(phiout) * -1.0
+
+        if saveit is not None and i % saveit == 0:
+            save_object(
+                (solx[-saveit:], soly[-saveit:], solp[-saveit:]),
+                f"../results/temp/{UID}_int_sol_{i}.tmp",
+            )
+    # results = (solx, soly, solp)
+    results = (solx, uy, solp)
+    print('lengths of solx, soly, solp, ux: ')
+    print(len(solx))
+    print(len(soly))
+    print(len(solp))
+    print(len(ux))
+
+
+    if ret_times:
+        results += (times,)
+
+    if verbose:
+        return results + (error,)
+
+    return results
+
