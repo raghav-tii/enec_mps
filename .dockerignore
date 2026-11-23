@@ -1,0 +1,8 @@
+.git/
+data/results/
+report/fig/
+tutorial/*_presentation.ipynb
+**/__pycache__/
+.ruff_cache/
+*.egg-info/
+.venv/

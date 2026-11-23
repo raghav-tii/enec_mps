@@ -1,1 +1,13 @@
-python post_processing.py 
+#!/bin/bash
+# Per-rod forces of a run and comparison with the archived production run.
+# Usage:  ./post TAG [rod_forces.py options, e.g. --workers 16 --append]
+set -eu
+cd "$(dirname "$0")"
+TAG=${1:?usage: $0 TAG [rod_forces options]}; shift
+python3 -u rod_forces.py --tag "$TAG" "$@"
+case "$TAG" in
+  q10_*)       REF=../data/archive/rod_forces_q10_t2500_bd40_rk4.csv ;;
+  q11_*)       REF=../data/archive/rod_forces_q11_t2500_bd60_rk4.csv ;;
+  *)           REF= ;;
+esac
+if [ -n "$REF" ]; then python3 compare_rod_forces.py "../data/results/rod_forces_$TAG.csv" "$REF"; fi

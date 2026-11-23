@@ -1,9 +1,10 @@
-__COMP_ACC = 1e-12
+__COMP_ACC = 1e-6
 __BD_LIMIT = None
 __ARCH_2D = "stacked"
 __parameters = {"a": 0.0, "b": 2.0, "L": 8, "disable_compile": True, "low_acc": False}
 __device = "cpu"
-__compress_method = "randomized"
+__compress_method = "svd"
+__preserve_norm = False
 
 
 def COMP_ACC():
@@ -26,8 +27,12 @@ def COMPRESS_METHOD():
     return __compress_method
 
 
+def NORM_PRESERVATION():
+    return __preserve_norm
+
+
 def parameters(key=None):
-    if key in ["ax", "bx", "ay", "by", "Lx", "Ly"] and key not in __parameters.keys():
+    if key in ["ax", "bx", "ay", "by", "Lx", "Ly"] and key not in __parameters:
         return __parameters[key[0]]
     elif key is not None:
         return __parameters[key]

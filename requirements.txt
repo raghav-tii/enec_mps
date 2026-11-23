@@ -1,16 +1,7 @@
-# Core dependencies
-numpy
-scipy
-tqdm
-matplotlib >= 3.6.0
-torch
-# mandatory libs for functionality
-einops
-tntorch
-opt_einsum
-cotengra
-teneva
-
-# optional libs (Manual installation needed)
-# maxvolpy
-# kahypar
+# Versions the package was verified with (2026-11-23).  torch is installed
+# separately in the Dockerfile so the CPU or CUDA wheel can be chosen.
+numpy==2.5.3
+scipy==1.18.1
+einops==0.8.2
+matplotlib==3.11.2
+jupyterlab==4.5.11

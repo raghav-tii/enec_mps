@@ -1,3 +1,24 @@
-#                 u0 nsteps nu dt geometry Nx Ny
-python Poisson.py 1.5 2 3e-3 1.0 circle 8 7
-#python simulation_script.py 1.5 10 3e-3 2e-3 circle 8 7
+#!/bin/bash
+# Time-step the 21-rod bundle on this machine.
+#   ./run q10 | q11 | smoke  [extra bundle_simulation.py run options]
+#   DEVICE=cuda ./run q10                 # on a GPU (the report runs used an RTX A6000)
+#   ./run q10 --restart                   # continue from the last saved snapshot
+# Each call advances --nt steps (500 for q10, 300 for q11; the report runs have
+# 5530 and 1486 steps); snapshots go to data/results/temp/, so a run can be
+# stopped and resumed with --restart at any point.
+# Production settings of the two report runs (Star-CCM+ warm start at tU/D=2500,
+# RK4, CFL 0.4, Re 100, D/pitch 0.5, held projection, AMEn with 6 sweeps).
+set -eu
+cd "$(dirname "$0")"
+case "${1:-}" in
+  q10)   shift; exec python3 -u bundle_simulation.py run --p 5 --lf 5 --max-bd 40 --nt 500 --tag q10_t2500_bd40_rk4 \
+             --re 100 --cfl 0.4 --rk4 --d-over-pitch 0.5 --opt-iter 6 --eps 1e-12 --warm-start auto --device "${DEVICE:-cpu}" "$@" ;;
+  q11)   shift; exec python3 -u bundle_simulation.py run --p 6 --lf 5 --max-bd 60 --nt 300 --tag q11_t2500_bd60_rk4 \
+             --re 100 --cfl 0.4 --rk4 --d-over-pitch 0.5 --opt-iter 6 --eps 1e-12 --warm-start auto --device "${DEVICE:-cpu}" "$@" ;;
+  smoke) shift; python3 bundle_simulation.py warmstart --vtk ../data/star_ccm/star_t2500.vtk --p 5 --sizes 3 \
+             --d-over-pitch 0.5 --max-bd 24 --out-dir ../data/results/smoke --mask-dir ../data/results/smoke
+         exec python3 -u bundle_simulation.py run --p 5 --lf 3 --max-bd 24 --nt 3 --tag smoke \
+             --re 100 --rk4 --d-over-pitch 0.5 --opt-iter 4 --mask-dir ../data/results/smoke \
+             --warm-start ../data/results/smoke/enec_ic_p5_f3_d500.mps "$@" ;;
+  *) echo "usage: $0 q10|q11|smoke [bundle_simulation.py run options]" >&2; exit 2 ;;
+esac

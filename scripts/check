@@ -1,0 +1,10 @@
+#!/bin/bash
+# Self-checks: the golden difference-operator test, the chorin_projection suite, bundle_simulation's check,
+# rod_forces' probe-vs-dense check and the dense twin.  A few minutes on a laptop CPU.
+set -eu
+cd "$(dirname "$0")"
+python3 -m unittest discover -s ../tests -p "*_test.py"
+python3 chorin_projection.py
+python3 bundle_simulation.py check
+python3 -c "import rod_forces; rod_forces.selfcheck()"
+python3 dense_projection_check.py --Q 5 --steps 2 --rk4 --held
