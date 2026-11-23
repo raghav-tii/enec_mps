@@ -1,0 +1,16 @@
+# Installs tensnet from this repository (pip install -e .).
+[project]
+name = "tensnet"
+version = "0.1.4"
+authors = [{ name = "Raghavendra P", email = "rdheeeraj@gmail.com" }]
+description = "Matrix product states and operators, finite-difference MPOs and AMEn/DMRG solvers for the QCFD 21-rod bundle solver"
+readme = "tensnet/README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "torch", "einops"]
+
+[tool.setuptools]
+packages = ["tensnet", "tensnet.linalg", "tensnet.networks", "tensnet.utils"]
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"

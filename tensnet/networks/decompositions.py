@@ -1,28 +1,49 @@
-from typing import Callable
+import concurrent
 
-import tntorch as tnt
 import torch
 
-from .base_mpo import identity_mpo, mps_to_mpo
-from ..utils import COMP_ACC, svd, qr, get_arrays_einsum, get_best_path
-from .base_mps import MPS, MPS_Node, list_to_mps, random_mps
-import concurrent
+from ..utils import qr, svd
+from .base_mpo import mps_to_mpo
+from .base_mps import list_to_mps
 
 
 def _tensors_from_sv(
-    sv, d: int, L: int, eps: float = None, bdmax: int = None, naive_svd=True
+    sv,
+    d: int,
+    L: int,
+    eps: float = None,
+    bdmax: int = None,
+    naive_svd=True,
 ):
-    assert (
-        torch.numel(sv) == d**L
-    ), "Size of the State Vector does not match the dimensions"
+    """Decomposes a state vector into a tensor train (TT) format using singular value decomposition (SVD) or QR decomposition.
+
+    Args:
+        sv (torch.Tensor): The state vector to decompose. Must have a size of d**L.
+        d (int): The dimension of each local tensor.
+        L (int): The number of local tensors in the TT.
+        eps (float, optional): Threshold for singular values. Singular values below this threshold are discarded. Defaults to None.
+        bdmax (int, optional): Maximum bond dimension. If the bond dimension exceeds this value, it is truncated. Defaults to None.
+        naive_svd (bool, optional): If True, uses a naive SVD approach. If False, uses QR decomposition followed by SVD. Defaults to True.
+
+    Returns:
+        list[torch.Tensor]: A list of torch.Tensors representing the TT cores. Each tensor has shape (bond_dim_left, d, bond_dim_right),
+        except for the first and last tensors, which have bond_dim_left=1 and bond_dim_right=1, respectively.
+
+    Raises:
+        AssertionError: If the size of the state vector does not match the dimensions (d**L).
+    """
+
+    assert torch.numel(sv) == d**L, (
+        "Size of the state vector does not match the dimensions"
+    )
     temp = torch.clone(sv)
     if naive_svd:
-        S = torch.ones(1)
+        S = torch.ones(1, dtype=temp.dtype, device=temp.device)
         A = []
         for i in range(1, L):
             U, S, V = svd(temp.reshape([d * len(S), d ** (L - i)]), eps, bdmax)
             A.append(U.reshape(-1, d, len(S)))
-            temp = torch.diag(S) @ V
+            temp = S.type(temp.dtype).unsqueeze(1) * V
         A.append(temp.reshape(len(S), d, 1))
         return A
     else:
@@ -38,7 +59,13 @@ def _tensors_from_sv(
 
 
 # SLIGHTLY FASTER IMPLEMENATION WHEN BD NOT GIVEN
-def _tensors_from_sv2(sv, d: int, L: int, eps: float = None, bdmax: int = None):
+def _tensors_from_sv2(
+    sv,
+    d: int,
+    L: int,
+    eps: float = None,
+    bdmax: int = None,
+):
     vec = sv.reshape([d] * L)
     U_list = []
     S_list = []
@@ -47,7 +74,7 @@ def _tensors_from_sv2(sv, d: int, L: int, eps: float = None, bdmax: int = None):
     def process(i):
         vec_i = vec.reshape(d**i, -1)
         U, S, V = svd(vec_i, eps, bdmax)
-        return U, torch.diag(S), V
+        return U, S, V
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = list(executor.map(process, range(1, L)))
@@ -61,7 +88,7 @@ def _tensors_from_sv2(sv, d: int, L: int, eps: float = None, bdmax: int = None):
         Uk1 = U_list[j + 1]
         W_k1 = Uk.T @ Uk1.reshape(d ** (j + 1), -1)
         G_list.append(W_k1.reshape(-1, d, int(W_k1.shape[1] / d)))
-    G_list.append((S_list[-1] @ V_list[-1]).reshape(-1, d, 1))
+    G_list.append((S_list[-1].unsqueeze(1) * V_list[-1]).reshape(-1, d, 1))
     return G_list
 
 
@@ -102,195 +129,68 @@ def matrix_to_mpo(matrix, d: int, L: int, eps: float = None, bdmax: int = None):
     return mps_to_mpo(vector_to_mps(vec, d**2, L, eps, bdmax)).transpose()
 
 
-def vector_to_node(vector, lbd: int, rbd: int, pd: int = 2, boundary=None):
-    tensor = vector.reshape(lbd, pd, rbd)
-    return MPS_Node(tensor, boundary=boundary)
 
 
-def vector_to_2nodes(
-    vector, lbd: int, rbd: int, pd: int = 2, max_bd=None, boundary1=None, boundary2=None
-):
-    matrix = vector.reshape(lbd * pd, pd * rbd)
-    U, S, V = svd(matrix, eps=COMP_ACC(), bdmax=max_bd)
-    tensor1 = U
-    tensor2 = torch.diag(S) @ V
-    return MPS_Node(
-        tensor1.reshape(lbd, pd, len(S)), boundary=boundary1, canonical="left"
-    ), MPS_Node(tensor2.reshape(len(S), pd, rbd), boundary=boundary2)
 
 
-def cross_approximation(
-    function: Callable,
-    nofq: int,
-    pd: int,
-    mps=None,
-    eps: float = 1e-6,
-    max_rank: int = None,
-    max_iter: int = 15,
-    val_size: int = 5e3,
-    verbose: bool = False,
-    suppress_warnings=True,
-    **kwargs,
-):
-    if mps is None:
-        domain = [torch.tensor(range(pd))] * nofq
-        mps_torch = tnt.cross(
-            function,
-            domain=domain,
-            eps=eps,
-            max_iter=max_iter,
-            verbose=verbose,
-            val_size=val_size,
-            rmax=max_rank,
-            suppress_warnings=suppress_warnings,
-            **kwargs,
-        )
-    else:
-        tensors = tnt.Tensor([node.tensor for node in mps])
-        mps_torch = tnt.cross(
-            function,
-            tensors=tensors,
-            eps=eps,
-            max_iter=max_iter,
-            verbose=verbose,
-            val_size=val_size,
-            rmax=max_rank,
-            **kwargs,
-        )
-    nodes = []
-    for tensor in mps_torch.cores:
-        nodes.append(MPS_Node(tensor))
-    return MPS(nodes)
 
 
-def tt_cross(
-    function: Callable,
-    nofq: int,
-    pd: int = 2,
-    eps: float = None,
-    max_iter: int = None,
-    max_rank: int = None,
-    verbose: bool = False,
-):
-    try:
-        from teneva import cross
-    except ModuleNotFoundError as e:
-        print(f"{e}:teneva module not found. Please use cross_approximation function.")
-    if max_rank is None:
-        max_rank = 0
-    Y0 = [node.tensor.numpy() for node in random_mps(nofq, pd=pd, bd=max(1, max_rank))]
-    info = {}
-    cores = cross(function, Y0, nswp=max_iter, e=eps, info=info, log=verbose)
-    mps = list_to_mps(cores)
-    print(info)
-    return mps
 
 
-def get_opt_paths(A_shapes, b_shapes, x_shapes, dmrg_sites):
-    opt_paths_ip = []
-    opt_paths_opip = []
-    for ix in range(len(A_shapes)):
-        path_ip, path_opip = get_best_path(
-            A_shapes, b_shapes, x_shapes, list(range(ix, ix + dmrg_sites))
-        )
-        opt_paths_ip.append(path_ip)
-        opt_paths_opip.append(path_opip)
-    return opt_paths_ip, opt_paths_opip
 
 
 _MALS_PATHS_CACHE = {}
 
 
-def tt_mals(
-    b: MPS,
-    init_mps: MPS = None,
-    max_rank: MPS = 10,
-    nsweeps: int = 3,
-    eps: float = 1e-3,
-    dmrg_sites: int = 2,
-    opt_paths=True,
-    verbose=False,
-):
-    pd = b[0].shape[1]
-    L = len(b)
-    assert dmrg_sites < 3, f"Performing MALS with {dmrg_sites} sites is not supported"
-    var = 0.2
-    if init_mps is None:
-        x = random_mps(L, pd=pd, bd=max_rank, var=var)
-    else:
-        x = init_mps.copy()
 
-    x.left_canonical()
-    history = []
-    b_norm = b.norm
-    error = (x + b * -1.0).norm / b_norm
-    history.append(error)
-    A = identity_mpo(L)
-    A_shapes = [node.shape for node in A]
-    b_shapes = [node.shape for node in b]
-    x_shapes = [node.shape for node in x]
 
-    key = str(abs(hash((tuple(b_shapes), tuple(x_shapes), dmrg_sites))))
+# TODO Implement the TT-MALS algorithm to compress MPS using DMRG
+# _EINSUM_PATHS_CACHE = {}
 
-    if opt_paths:
-        if key in _MALS_PATHS_CACHE.keys():
-            _MALS_PATHS_CACHE.pop(key)
 
-    try:
-        opt_paths1 = _MALS_PATHS_CACHE[key]
-    except KeyError:
-        opt_paths1, _ = get_opt_paths(A_shapes, b_shapes, x_shapes, dmrg_sites)
-        _MALS_PATHS_CACHE[key] = opt_paths1
+# def tt_mals_2(
+#     vector,
+#     nofq,
+#     pd=2,
+#     mps_init=None,
+#     init_rank=None,
+#     dmrg_sites=2,
+#     max_sweeps=3,
+#     max_rank=None,
+#     verbose=False,
+#     opt_paths=True,
+# ):
+#     assert (
+#         torch.numel(vector) == pd**nofq
+#     ), "Size of the vector does not match the dimensions"
+#     tensor = torch.reshape(vector, [pd] * nofq)
 
-    for iter in range(nsweeps):
-        for ix in range(L - dmrg_sites + 1):
-            if iter % 2 != 0:
-                ix = L - ix - dmrg_sites
-            b.mixed_canonical(ix)
-            x.mixed_canonical(ix)
-            arrays1, _ = get_arrays_einsum(A, b, x, list(range(ix, ix + dmrg_sites)))
-            vector = opt_paths1[ix](*arrays1).flatten()
-            rl = x.ranks_list
-            if ix == 0:
-                boundary1 = "left"
-                boundary2 = None
-            elif ix == len(A) - 2:
-                boundary1 = None
-                boundary2 = "right"
-            else:
-                boundary1 = None
-                boundary2 = None
+#     if mps_init is None and init_rank is None:
+#         raise ValueError(
+#             "Both the initialization of MPS and initialization rank cannot be None at the same time. Provide at least one of the arguments."
+#         )
 
-            if dmrg_sites == 2:
-                x[ix], x[ix + 1] = vector_to_2nodes(
-                    vector=vector,
-                    lbd=rl[ix],
-                    rbd=rl[ix + 2],
-                    pd=pd,
-                    max_bd=max_rank,
-                    boundary1=boundary1,
-                    boundary2=boundary2,
-                )
-            elif dmrg_sites == 1:
-                if boundary1 is None and boundary2 is None:
-                    boundary = None
-                elif boundary2 is None:
-                    boundary = boundary1
-                else:
-                    boundary = boundary2
-                x[ix] = vector_to_node(
-                    vector=vector,
-                    pd=pd,
-                    lbd=rl[ix],
-                    rbd=rl[ix + 1],
-                    boundary=boundary,
-                )
+#     if mps_init is None:
+#         mps_init = random_mps(nofq, init_rank, pd=pd)
+#     nodes = mps_init.copy().nodes
+#     b_shapes = [node.shape for node in nodes]
 
-            error = (x + b * -1.0).norm / b_norm
-            history.append(error)
-        if history[-1] < eps:
-            break
+#     key = str(abs(hash((pd, nofq, tuple(b_shapes), dmrg_sites))))
 
-    if verbose:
-        return x, history
-    return x
+#     if opt_paths:
+#         if key in _EINSUM_PATHS_CACHE.keys():
+#             _EINSUM_PATHS_CACHE.pop(key)
+
+#     try:
+#         paths = _EINSUM_PATHS_CACHE[key]
+#     except KeyError:
+#         paths = []
+#         for _ in len(b_shapes):
+#             paths.append(compute_best_path())
+#         _EINSUM_PATHS_CACHE[key] = paths
+
+#     for i in range(max_sweeps):
+#         for ix in range(nofq - dmrg_sites + 1):
+#             if i % 2 != 0:
+#                 ix = nofq - ix - dmrg_sites
+#     return None

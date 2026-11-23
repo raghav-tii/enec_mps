@@ -1,0 +1,13 @@
+state,method,chi,grad_err,div_after
+c000_int_sol_0,best,25,7.226e-01,1.93e-03
+c000_int_sol_0,best,40,5.260e-01,1.48e-03
+c000_int_sol_0,best,80,1.843e-01,5.90e-04
+c000_int_sol_0,best,120,5.979e-02,2.13e-04
+c000_int_sol_0,best,200,6.681e-03,2.61e-05
+c000_int_sol_0,solver,40,3.969e-01,9.88e-04
+c003_int_sol_31,best,25,8.296e-01,2.70e-03
+c003_int_sol_31,best,40,5.590e-01,1.83e-03
+c003_int_sol_31,best,80,2.084e-01,7.56e-04
+c003_int_sol_31,best,120,6.863e-02,2.63e-04
+c003_int_sol_31,best,200,1.017e-02,4.39e-05
+c003_int_sol_31,solver,40,4.228e-01,1.16e-03

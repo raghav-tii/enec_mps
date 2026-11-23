@@ -1,2 +1,5 @@
-rm ../data/results/*.pfile
-rm ../data/results/*.mpssol
+#!/bin/bash
+# Remove run outputs (snapshots, params, forces) from data/results/.
+cd "$(dirname "$0")"
+rm -rf ../data/results/temp/*.tmp ../data/results/*.pfile ../data/results/*.npz \
+       ../data/results/*.csv ../data/results/*.mpssol ../data/results/smoke
