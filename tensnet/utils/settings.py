@@ -12,9 +12,7 @@ def set_comp_method(method):
     if method in ["randomized", "svd", "randomized_svd", "off"]:
         config.__compress_method = method
     else:
-        raise ValueError(
-            f"{method} not supported, must be one of randomized or svd or off."
-        )
+        raise ValueError(f"{method} not supported, must be one of randomized or svd or off.")
 
 
 def set_accuracy(accuracy):

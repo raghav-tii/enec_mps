@@ -2,46 +2,60 @@
 
     python3 inlet.py TAG STRIDE
 
-Writes   data/archive/inlet_<TAG>.csv with, per snapshot, u on the inlet plane (min, max, mean, rms deviation
-         from U), max |v| there, and the mean u on row 4 (the first row the hold does not cover) and on the
-         outlet plane.  The domain is y-periodic with uniform spacing, so a plane's mean u is its volume
-         flux over the domain height.
+Writes   data/archive/inlet_<TAG>.csv with, per snapshot, u on the inlet plane (min, max,
+         mean, rms deviation from U), max |v| there, and the mean u on row 4 (the first row
+         the hold does not cover) and on the outlet plane.  The domain is y-periodic with
+         uniform spacing, so a plane's mean u is its volume flux over the domain height.
 Used by  plots.py.
 """
+
 import os
 import sys
 
 import numpy as np
+
 import tensnet as tt
 
-from _paths import IC_DIR, MASK_DIR, OUT, RESULTS, SOLVER
-sys.path.insert(0, SOLVER)
 import bundle_simulation as es
+import chorin_projection as C
+from _paths import OUT, RESULTS, warm_start_file
 
 tt.set_arch("sequential")
-tag, stride = sys.argv[1], int(sys.argv[2])
-R = RESULTS
-cfg = tt.load_object(os.path.join(R, f"{tag}_params.pfile"))
-Q, U = cfg["p"] + cfg["Lf"], cfg["u"]
-dense = lambda m: tt.unshuffle_axis(m.contract(), Q, 2).numpy()
-ws = tt.load_object(os.path.expanduser(os.environ.get(
-    "IC", f"{IC_DIR}/enec_ic_p{cfg['p']}_f{cfg['Lf']}_d500.mps")))
-snaps = es.find_snapshots(tag, R)
-out = os.path.expanduser(f"{OUT}/inlet_{tag}.csv")
-with open(out, "w") as fh:
-    fh.write("step,t,in_min,in_max,in_mean,in_rms_dev,in_vmax,row4_mean,out_mean\n")
-    todo = [(0, ws["ux"], ws["uy"])]
-    todo += [(k + 1, None, snaps[k][2]) for k in range(stride - 1, len(snaps), stride)]
-    for step, ux, uy in todo:
-        if ux is None:
+HEADER = "step,t,in_min,in_max,in_mean,in_rms_dev,in_vmax,row4_mean,out_mean"
+
+
+def main(tag, stride):
+    cfg = tt.load_object(os.path.join(RESULTS, f"{tag}_params.pfile"))
+    Q = cfg["p"] + cfg["Lf"]
+    warm = tt.load_object(warm_start_file(cfg["p"], cfg["Lf"]))
+    snaps = es.find_snapshots(tag, RESULTS)
+
+    out = os.path.expanduser(f"{OUT}/inlet_{tag}.csv")
+    with open(out, "w") as fh:
+        fh.write(HEADER + "\n")
+        steps = [(0, warm["ux"], warm["uy"])]  # step 0 is the warm start
+        for k in range(stride - 1, len(snaps), stride):
             try:
-                ux, uy, _ = tt.load_object(uy)
+                ux, uy, _p = tt.load_object(snaps[k][2])
             except Exception:
                 continue
-        u, v = dense(ux), dense(uy)
-        fh.write(f"{step},{step * cfg['dt'] / cfg['D']:.3f},{u[0].min():.4f},{u[0].max():.4f},"
-                 f"{u[0].mean():.4f},{np.sqrt(((u[0] - U) ** 2).mean()):.4f},"
-                 f"{np.abs(v[0]).max():.4f},{u[4].mean():.4f},{u[-1].mean():.4f}\n")
-        fh.flush()
-        print(step, flush=True)
-print("ok", out)
+            steps.append((k + 1, ux, uy))
+        for step, ux, uy in steps:
+            fh.write(plane_statistics(step, C.mps_to_grid(ux, Q), C.mps_to_grid(uy, Q), cfg) + "\n")
+            fh.flush()
+            print(step, flush=True)
+    print("ok", out)
+
+
+def plane_statistics(step, u, v, cfg):
+    """One CSV row: u on the inlet plane (x = 0), |v| there, u on row 4 and on the outlet."""
+    inlet = u[0]
+    return (
+        f"{step},{step * cfg['dt'] / cfg['D']:.3f},{inlet.min():.4f},{inlet.max():.4f},"
+        f"{inlet.mean():.4f},{np.sqrt(((inlet - cfg['u']) ** 2).mean()):.4f},"
+        f"{np.abs(v[0]).max():.4f},{u[4].mean():.4f},{u[-1].mean():.4f}"
+    )
+
+
+if __name__ == "__main__":
+    main(sys.argv[1], int(sys.argv[2]))

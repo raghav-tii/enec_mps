@@ -4,7 +4,6 @@ import torch
 from scipy import sparse
 
 
-
 def save_object(obj, filename):
     try:
         with open(filename, "wb") as f:
@@ -19,8 +18,6 @@ def load_object(filename):
             return pickle.load(f)
     except Exception as ex:
         print("Error during unpickling object (Possibly unsupported):", ex)
-
-
 
 
 def _svd_phase_corrected_torch(A: torch.Tensor, full_matrices: bool = False):
@@ -194,8 +191,6 @@ def svd(M: torch.Tensor, eps: float = None, bdmax: int = None, renormalize: bool
 #             return U[:, :bd], S[:bd], V[:bd, :]
 
 
-
-
 # @torch.compile(dynamic=True)
 def qr(tensor):
     return torch.linalg.qr(tensor)
@@ -208,9 +203,7 @@ def rq(tensor):
     # R1 = R.permute(1, 0)
     device = tensor.device
     dtype = tensor.dtype
-    Q, R = qr(
-        (torch.flip(torch.eye(tensor.shape[0], device=device, dtype=dtype), (0,)) @ tensor).T
-    )
+    Q, R = qr((torch.flip(torch.eye(tensor.shape[0], device=device, dtype=dtype), (0,)) @ tensor).T)
     Q1 = torch.flip(torch.eye(Q.T.shape[0], device=device, dtype=dtype), (0,)) @ Q.T
     R1 = (
         torch.flip(torch.eye(R.T.shape[0], device=device, dtype=dtype), (0,))
@@ -240,7 +233,7 @@ def conjgrad(A, b, x=None):
     p = torch.clone(r)
     rsold = torch.linalg.norm(r)
 
-    for i in range(len(b)):
+    for _i in range(len(b)):
         Ap = A @ p
 
         alpha = rsold**2 / (p @ Ap)
@@ -334,6 +327,7 @@ def direct_solver(A, b):
     A : matrix
     b : vector
     """
+
     def _lstsq_fallback():
         # CUDA's torch.linalg.lstsq only supports the full-rank "gels" driver,
         # so it silently returns garbage on the singular/rank-deficient
@@ -358,8 +352,6 @@ def direct_solver(A, b):
         if not torch.isfinite(rel_res) or rel_res > _DIRECT_SOLVE_RESIDUAL_FALLBACK:
             return _lstsq_fallback()
     return x
-
-
 
 
 def eigen_solver(A, k=1, criteria="abs", descending=True):
@@ -393,8 +385,6 @@ def eigen_solver(A, k=1, criteria="abs", descending=True):
     return evals_sorted[:k], evecs_sorted[:, :k]
 
 
-
-
 def nested_list_to_tensor(nested_list, device=None):
     if isinstance(nested_list, list):
         return torch.stack([nested_list_to_tensor(item, device) for item in nested_list])
@@ -402,8 +392,6 @@ def nested_list_to_tensor(nested_list, device=None):
         return nested_list.to(device) if device is not None else torch.clone(nested_list)
     else:
         return torch.tensor(nested_list, device=device)
-
-
 
 
 def validate_nodes(nodes):
@@ -416,12 +404,10 @@ def validate_nodes(nodes):
     return nodes
 
 
-
-
 def val_addability(self, other, p_axis=1):
     assert self.order == other.order, (
         "Only tensors of same order can be added."
-        + "Received {} and {} -order tensors".format(self.order, other.order)
+        + f"Received {self.order} and {other.order} -order tensors"
     )
     assert self.dim[p_axis] == other.dim[p_axis], (
         "Failed to add coz of mismatched shape on the physical leg(s)"
@@ -430,21 +416,19 @@ def val_addability(self, other, p_axis=1):
     return (self.order == other.order) and self.dim[p_axis] == other.dim[p_axis]
 
 
-
-
 def get_local_inds(int_inds, nofq, base=2):
     digits = []
     num = int_inds if isinstance(int_inds, int) else int_inds.item()
     if not 0 <= num < base**nofq:  # out of range would never reach nofq digits and loop forever
-        raise ValueError(f"index {num} out of range for {nofq} sites of dimension {base}: need 0 <= index < {base**nofq}")
+        raise ValueError(
+            f"index {num} out of range for {nofq} sites of dimension {base}: need 0 <= index < {base**nofq}"
+        )
     while num:
         digits.append(int(num % base))
         num //= base
     while len(digits) != nofq:
         digits.append(0)
     return digits[::-1]
-
-
 
 
 def unshuffle_axis(A: torch.Tensor, L: int, d: int):
@@ -464,30 +448,4 @@ def shuffle_axis(A: torch.Tensor, L: int):
     return A
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Network Contraction Utils
-
-
-
-
-
-
-
-
-
-
-
-

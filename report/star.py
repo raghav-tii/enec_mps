@@ -4,14 +4,15 @@ The solver's own warm start is nearest-neighbour; that is fine as an initial
 condition but its stair steps show up as stripes in maps and derivatives, so
 figures use this instead.  Coordinates are in D with the bundle centre at 0.
 """
+
 import os
 import tarfile
 
 import numpy as np
 
+from _paths import REF as DATA  # cached star_t*.vtk snapshots live with the monitors
 from _paths import STAR_TAR as TAR
 from star_vtk import read_star_vtk
-from _paths import REF as DATA  # cached star_t*.vtk snapshots live with the monitors
 
 
 def star_on_grid(gx, gy, t=2500):

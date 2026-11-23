@@ -239,10 +239,6 @@ def _absorb_rhs_renv(rhs_node, core, prev_env=None, bra=None):
     return einsum(prev_env, rhs_node, bra, "br ur, bl i br, ul i ur -> bl ul")
 
 
-
-
-
-
 class LocalPreconditioner:
     """Applies ``P_hat^{-1}`` for one supercore, without ever forming it.
 
@@ -270,17 +266,13 @@ class LocalPreconditioner:
 
     def __init__(self, p_hat, diag_rtol=None):
         if p_hat.ndim != 2 or p_hat.shape[0] != p_hat.shape[1]:
-            raise ValueError(
-                f"projected preconditioner must be square, got {tuple(p_hat.shape)}"
-            )
+            raise ValueError(f"projected preconditioner must be square, got {tuple(p_hat.shape)}")
         rtol = self.DIAG_RTOL if diag_rtol is None else diag_rtol
 
         diag = torch.diagonal(p_hat)
         scale = p_hat.abs().max()
         off_diag_mass = (p_hat - torch.diag(diag)).abs().max()
-        self.is_diagonal = bool(off_diag_mass <= rtol * scale) and bool(
-            (diag.abs() > 0).all()
-        )
+        self.is_diagonal = bool(off_diag_mass <= rtol * scale) and bool((diag.abs() > 0).all())
 
         self.is_singular = False
         if self.is_diagonal:
@@ -361,9 +353,7 @@ def make_local_solver(
         def solve(matrix, vector, precond=None):
             if precond is None:
                 return conjgrad(matrix, vector)
-            sol, converged = _matfree_cg(
-                lambda v: matrix @ v, vector, precond=precond.apply
-            )
+            sol, converged = _matfree_cg(lambda v: matrix @ v, vector, precond=precond.apply)
             if not converged:
                 return direct_solver(matrix, vector)
             return sol
@@ -384,9 +374,7 @@ def make_local_solver(
         def solve(matrix, vector, precond=None):
             if vector.shape[0] <= matfree_threshold:
                 if precond is not None:
-                    return direct_solver(
-                        precond.apply_matrix(matrix), precond.apply(vector)
-                    )
+                    return direct_solver(precond.apply_matrix(matrix), precond.apply(vector))
                 return direct_solver(matrix, vector)
             sol, converged = _matfree_cg(
                 lambda v: matrix @ v,
@@ -571,12 +559,6 @@ def compute_env_tensors(A, b, x, test=None):
     return lhs_env_tensors, rhs_env_tensors, lhs_env_lognorms, rhs_env_lognorms
 
 
-
-
-
-
-
-
 def forward_sweep(
     A,
     b,
@@ -637,9 +619,7 @@ def forward_sweep(
         pd = x[ix].shape[1]
 
         # --- reduced system ------------------------------------------------
-        local_matrix = project_operator_2site(
-            A[ix].tensor, A[ix + 1].tensor, left_env, right_env
-        )
+        local_matrix = project_operator_2site(A[ix].tensor, A[ix + 1].tensor, left_env, right_env)
         local_vector = project_rhs_2site(
             b[ix].tensor, b[ix + 1].tensor, rhs_left_env, rhs_right_env
         )
@@ -795,9 +775,7 @@ def reverse_sweep(
         pd = x[ix + 1].shape[1]
 
         # --- reduced system ------------------------------------------------
-        local_matrix = project_operator_2site(
-            A[ix].tensor, A[ix + 1].tensor, left_env, right_env
-        )
+        local_matrix = project_operator_2site(A[ix].tensor, A[ix + 1].tensor, left_env, right_env)
         local_vector = project_rhs_2site(
             b[ix].tensor, b[ix + 1].tensor, rhs_left_env, rhs_right_env
         )
@@ -908,8 +886,6 @@ def normal_equations(A: MPO, b: MPS):
     """
     A_dag = A.dagger()
     return A.apply(A_dag), A_dag.apply(b)
-
-
 
 
 def _petrov_test_space(A, x):
@@ -1039,9 +1015,7 @@ def linsys_dmrg2(
     # makes one pass over the chain enough for both.
     precond_env = None
     if preconditioner is not None:
-        preconditioner = _align_operator_dtype(
-            preconditioner, solution[0].tensor.dtype
-        )
+        preconditioner = _align_operator_dtype(preconditioner, solution[0].tensor.dtype)
         precond_env = compute_mpo_env(preconditioner, solution)
 
     # `history`/`loss` exist solely to report per-half-sweep residual decay
@@ -1123,8 +1097,6 @@ def linsys_dmrg2(
     return solution, sol_lognorm
 
 
-
-
 def _align_operator_dtype(operator, dtype, label="preconditioner"):
     """Return ``operator`` with every core cast up to ``dtype``.
 
@@ -1165,13 +1137,3 @@ def compute_mpo_env(A, x, normalize=True):
             env, _ = _normalized(env)
         env_tensors.insert(0, env)
     return env_tensors
-
-
-
-
-
-
-
-
-
-

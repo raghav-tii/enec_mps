@@ -13,6 +13,7 @@ production settings of the incremental run, from its snapshot at step 500.
 Timings are medians of up to three runs after a warm-up; a run over 60 s is
 not repeated.  Output rows: part,device,dtype,sites,chi,seconds,runs,peak_mb,note
 """
+
 import os
 import statistics
 import sys
@@ -20,6 +21,7 @@ import time
 
 import numpy as np
 import torch
+
 import tensnet as tt
 
 dev = sys.argv[1]
@@ -36,9 +38,11 @@ def sync():
 def timed(fn, reps=3, limit=60.0):
     times = []
     for _ in range(reps):
-        sync(); t0 = time.perf_counter()
+        sync()
+        t0 = time.perf_counter()
         fn()
-        sync(); times.append(time.perf_counter() - t0)
+        sync()
+        times.append(time.perf_counter() - t0)
         if times[-1] > limit:
             break
     return statistics.median(times), len(times)
@@ -56,16 +60,23 @@ def problem(L, dtype):
     """-lap + 4 I on a periodic 2**L x 2**L grid, a rank-4 b and x0; built on CPU."""
     torch.manual_seed(0)
     nofq = [L, L]
-    A = (tt.get_diff_mpo(dim=2, axis=0, order=2, nofq=nofq, bc="periodic", device="cpu")
-         + tt.get_diff_mpo(dim=2, axis=1, order=2, nofq=nofq, bc="periodic", device="cpu"))
+    A = tt.get_diff_mpo(
+        dim=2, axis=0, order=2, nofq=nofq, bc="periodic", device="cpu"
+    ) + tt.get_diff_mpo(dim=2, axis=1, order=2, nofq=nofq, bc="periodic", device="cpu")
     A = A * -1.0 + tt.identity_mpo(2 * L, device="cpu") * 4.0
     b = tt.random_mps(2 * L, bd=4, pd=2, device="cpu")
     x0 = tt.random_mps(2 * L, bd=4, pd=2, device="cpu")
-    return A.to(device=dev, dtype=dtype), b.to(device=dev, dtype=dtype), x0.to(device=dev, dtype=dtype)
+    return (
+        A.to(device=dev, dtype=dtype),
+        b.to(device=dev, dtype=dtype),
+        x0.to(device=dev, dtype=dtype),
+    )
 
 
 SOLVE = {
-    "dmrg2": lambda A, b, x, chi: tt.linsys_dmrg2(A, b, x, trunc_eps=1e-10, max_rank=chi, max_iter=2),
+    "dmrg2": lambda A, b, x, chi: tt.linsys_dmrg2(
+        A, b, x, trunc_eps=1e-10, max_rank=chi, max_iter=2
+    ),
     "amen": lambda A, b, x, chi: tt.linsys_amen(A, b, x, max_rank=chi, max_iter=2, eps=1e-10),
 }
 CASES = [  # (solver, sites per axis, bond dimensions, dtypes)
@@ -89,16 +100,27 @@ for name, L, chis, dtypes in CASES if len(sys.argv) == 2 else ():
                 s, n = timed(lambda: SOLVE[name](A, b, x0, chi))
                 row(name, dev, str(dtype)[6:], 2 * L, chi, f"{s:.3f}", n, f"{peak():.0f}", "")
             except Exception as exc:  # out of memory or an unported path: record, move on
-                row(name, dev, str(dtype)[6:], 2 * L, chi, "", 0, "", f"{type(exc).__name__}: {exc}"[:200].replace(",", ";"))
+                row(
+                    name,
+                    dev,
+                    str(dtype)[6:],
+                    2 * L,
+                    chi,
+                    "",
+                    0,
+                    "",
+                    f"{type(exc).__name__}: {exc}"[:200].replace(",", ";"),
+                )
                 if dev == "cuda":
                     torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
 # --- one ENEC time step with the production settings ---------------------------
-from _paths import IC_DIR, MASK_DIR, OUT, RESULTS, SOLVER
+from _paths import MASK_DIR, RESULTS, SOLVER
+
 sys.path.insert(0, SOLVER)
-import chorin_projection
 import bundle_simulation as es
+import chorin_projection
 
 TAG, STEP = "p1A_inc_it6", 500
 R = RESULTS
@@ -107,31 +129,81 @@ Q = cfg["Q"]
 tt.set_bd_limit(cfg["max_bd"])
 tt.set_accuracy(cfg["eps"])
 tt.set_comp_method("randomized_svd")
-for k, v in (("ax", cfg["ax"]), ("bx", cfg["bx"]), ("Lx", Q), ("ay", cfg["ay"]),
-             ("by", cfg["by"]), ("Ly", Q), ("ux_val", cfg["u"]), ("low_acc", False)):
+for k, v in (
+    ("ax", cfg["ax"]),
+    ("bx", cfg["bx"]),
+    ("Lx", Q),
+    ("ay", cfg["ay"]),
+    ("by", cfg["by"]),
+    ("Ly", Q),
+    ("ux_val", cfg["u"]),
+    ("low_acc", False),
+):
     tt.set_param(k, v)
 tt.set_device(dev)
 try:
     ux, uy, p = (f.to(device=dev) for f in tt.load_object(es.find_snapshots(TAG, R)[STEP - 1][2]))
-    mask = es.load_or_build_mask(cfg["p"], cfg["Lf"], cfg["d_over_pitch"],
-                                 MASK_DIR).to(device=dev)
-    ops = chorin_projection.Operators(Q, cfg["dx"], cfg["dy"], bcv=chorin_projection.BCV_CHANNEL, bcp=chorin_projection.BCP_CHANNEL)
+    mask = es.load_or_build_mask(cfg["p"], cfg["Lf"], cfg["d_over_pitch"], MASK_DIR).to(device=dev)
+    ops = chorin_projection.Operators(
+        Q,
+        cfg["dx"],
+        cfg["dy"],
+        bcv=chorin_projection.BCV_CHANNEL,
+        bcp=chorin_projection.BCP_CHANNEL,
+    )
     if dev == "cuda":
         torch.cuda.reset_peak_memory_stats()
     guess, times = None, []
     for k in range(4):
-        sync(); t0 = time.perf_counter()
-        ux, uy, p, guess = chorin_projection.projection_step(ux, uy, ops, cfg["dt"], cfg["nu"], mask, cfg["eps"],
-                                       cfg["max_bd"], cfg["opt_iter"], guess=guess,
-                                       solver=cfg["solver"], pressure=p, rotational=True,
-                                       guard=cfg["poisson_guard"])
-        sync(); times.append(time.perf_counter() - t0)
+        sync()
+        t0 = time.perf_counter()
+        ux, uy, p, guess = chorin_projection.projection_step(
+            ux,
+            uy,
+            ops,
+            cfg["dt"],
+            cfg["nu"],
+            mask,
+            cfg["eps"],
+            cfg["max_bd"],
+            cfg["opt_iter"],
+            guess=guess,
+            solver=cfg["solver"],
+            pressure=p,
+            rotational=True,
+            guard=cfg["poisson_guard"],
+        )
+        sync()
+        times.append(time.perf_counter() - t0)
         if k == 0:  # first step, for the CPU-GPU comparison
-            np.savez(f"enec_step1_{'_'.join(sys.argv[1:])}.npz", ux=chorin_projection.mps_to_grid(ux.to(device="cpu"), Q),
-                     uy=chorin_projection.mps_to_grid(uy.to(device="cpu"), Q))
-    row("enec_step", dev, "float64", 2 * Q, cfg["max_bd"], f"{statistics.median(times[1:]):.3f}",
-        len(times) - 1, f"{peak():.0f}", "first step %.1f s" % times[0])
+            np.savez(
+                f"enec_step1_{'_'.join(sys.argv[1:])}.npz",
+                ux=chorin_projection.mps_to_grid(ux.to(device="cpu"), Q),
+                uy=chorin_projection.mps_to_grid(uy.to(device="cpu"), Q),
+            )
+    row(
+        "enec_step",
+        dev,
+        "float64",
+        2 * Q,
+        cfg["max_bd"],
+        f"{statistics.median(times[1:]):.3f}",
+        len(times) - 1,
+        f"{peak():.0f}",
+        "first step %.1f s" % times[0],
+    )
 except Exception as exc:
     import traceback
+
     traceback.print_exc(file=sys.stderr)
-    row("enec_step", dev, "float64", 2 * Q, cfg["max_bd"], "", 0, "", f"{type(exc).__name__}: {exc}"[:200].replace(",", ";"))
+    row(
+        "enec_step",
+        dev,
+        "float64",
+        2 * Q,
+        cfg["max_bd"],
+        "",
+        0,
+        "",
+        f"{type(exc).__name__}: {exc}"[:200].replace(",", ";"),
+    )

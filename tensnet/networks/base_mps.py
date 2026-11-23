@@ -1,5 +1,5 @@
 import warnings
-from typing import List, Union
+from typing import Union
 
 import numpy as np
 import torch
@@ -87,9 +87,7 @@ class MPS_Node:
             device=self.tensor.device,
         )
         for j in range(self.shape[1]):
-            sumt[:, j, :] = torch.block_diag(
-                self.tensor[:, j, :], other.tensor[:, j, :]
-            )
+            sumt[:, j, :] = torch.block_diag(self.tensor[:, j, :], other.tensor[:, j, :])
         if self.boundary == "left":
             sumt = torch.sum(sumt, axis=0).reshape(1, self.shape[1], -1)
         if self.boundary == "right":
@@ -123,14 +121,10 @@ class MPS_Node:
             return MPS_Node(tensor, boundary=self.boundary)
         else:
             raise TypeError(
-                "Expected type Scalar or MPS_Node but got {} type variable for multiplication".format(
-                    type(other)
-                )
+                f"Expected type Scalar or MPS_Node but got {type(other)} type variable for multiplication"
             )
 
-    def contract(
-        self, other: "MPS_Node", einstr=["l b e, e q r->l b q r", "l b q r-> l (b q) r"]
-    ):
+    def contract(self, other: "MPS_Node", einstr=["l b e, e q r->l b q r", "l b q r-> l (b q) r"]):
         """Given two nodes, and einstein summation notation, contract the corresponding tensors and return the tensor.
 
         Args:
@@ -147,8 +141,6 @@ class MPS_Node:
     def copy(self):
         """Returns a deep copy of the node with the same attributes."""
         return MPS_Node(self.tensor.detach().clone(), self.canonical, self.boundary)
-
-
 
     def dagger(self):
         tensor = torch.conj(self.tensor)
@@ -267,7 +259,6 @@ class MPS:
     def __iter__(self):
         return iter(self.nodes)
 
-
     def shapes(self):
         return [i.shape for i in self]
 
@@ -279,8 +270,6 @@ class MPS:
     def num_params(self):
         """Return the number of parameters in the MPS."""
         return sum([node.shape.numel() for node in self])
-
-
 
     def parameters(self):
         return self.tensors
@@ -297,7 +286,6 @@ class MPS:
             for node in self
         ]
         return MPS(nodes, validate=False)
-
 
     def compress(
         self,
@@ -403,14 +391,14 @@ class MPS:
             return MPS(new_nodes)
 
         elif compress_method == "randomized_kr":
-            return self._compress_randomized_kr(accuracy, max_bd, mps_lognorm if NORM_PRESERVATION() else None)
+            return self._compress_randomized_kr(
+                accuracy, max_bd, mps_lognorm if NORM_PRESERVATION() else None
+            )
 
         else:
             N = len(self)
             d1 = self[0].shape[1]
-            R = random_mps(
-                N, bd=max_bd + 10, pd=d1, var="shape", device=self[0].tensor.device
-            )
+            R = random_mps(N, bd=max_bd + 10, pd=d1, var="shape", device=self[0].tensor.device)
 
             W_list = partial_contractions(self, R)
             X = [self[0].tensor]
@@ -471,7 +459,11 @@ class MPS:
 
         for i in range(N - 1):
             d_i = mps[i].shape[1]
-            T = mps[i].tensor if carry is None else einsum(carry, mps[i].tensor, "l b, b d r -> l d r")
+            T = (
+                mps[i].tensor
+                if carry is None
+                else einsum(carry, mps[i].tensor, "l b, b d r -> l d r")
+            )
 
             with torch.no_grad():
                 T_norm = torch.norm(T)
@@ -488,12 +480,17 @@ class MPS:
             U_m, S_m, V_m = svd(M, eps=accuracy, bdmax=max_bd)
 
             new_core = V_unfolding(Q @ U_m, d_i)
-            new_nodes.append(MPS_Node(new_core, canonical="left",
-                                      boundary="left" if i == 0 else None))
+            new_nodes.append(
+                MPS_Node(new_core, canonical="left", boundary="left" if i == 0 else None)
+            )
             carry = S_m.type(dtype).unsqueeze(1) * V_m
 
-        T_last = mps[-1].tensor if carry is None else einsum(carry, mps[-1].tensor, "l b, b d r -> l d r")
-        d_last = mps[-1].shape[1]
+        T_last = (
+            mps[-1].tensor
+            if carry is None
+            else einsum(carry, mps[-1].tensor, "l b, b d r -> l d r")
+        )
+        mps[-1].shape[1]
         with torch.no_grad():
             T_norm = torch.norm(T_last)
             lognorm = lognorm + torch.log(T_norm)
@@ -669,8 +666,6 @@ class MPS:
         else:
             return self
 
-
-
     def conj(self):
         nodes = [node.conj() for node in self]
         return MPS(nodes)
@@ -678,8 +673,6 @@ class MPS:
     def dagger(self):
         nodes = [node.conj() for node in self]
         return MPS(nodes)
-
-
 
     def sample(self, n_samples: int, seed: int = None):
         """
@@ -697,7 +690,7 @@ class MPS:
             "Please use `MPS.query()` for getting the value of tensor in the given index."
         )
 
-    def query(self, inds: Union[int, List[int], slice]):
+    def query(self, inds: int | list[int] | slice):
         """Evaluates the MPS network for an index, a list of indices or a slice.
 
         This method computes the output of the MPS network for multiple indices simultaneously.
@@ -778,9 +771,9 @@ class MPS:
             mps1 = ones_mps(len(self), pd=self[0].shape[1], device=self[0].tensor.device)
             mps1[0] = mps1[0] * other
             other = mps1
-        assert len(self) == len(
-            other
-        ), "Addition possible only with MPS of equal number of sites/nodes."
+        assert len(self) == len(other), (
+            "Addition possible only with MPS of equal number of sites/nodes."
+        )
         sum_nodes = []
         for t1, t2 in zip(self, other):
             sum_nodes.append(t1 + t2)
@@ -792,9 +785,9 @@ class MPS:
         return self.__add__(other)
 
     def __sub__(self, other: "MPS"):
-        assert len(self) == len(
-            other
-        ), "Addition possible only with MPS of equal number of sites/nodes."
+        assert len(self) == len(other), (
+            "Addition possible only with MPS of equal number of sites/nodes."
+        )
         sum_nodes = []
         other = other * -1.0
         for t1, t2 in zip(self, other):
@@ -807,11 +800,7 @@ class MPS:
         if isinstance(other, MPS):
             pd = self[0].shape[1]
             bd = self.max_rank
-            if (
-                BD_LIMIT() is None
-                or COMPRESS_METHOD() == "svd"
-                or (pd != 2 and bd < BD_LIMIT())
-            ):
+            if BD_LIMIT() is None or COMPRESS_METHOD() == "svd" or (pd != 2 and bd < BD_LIMIT()):
                 nodes = []
                 for t1, t2 in zip(self, other):
                     nodes.append(t1 * t2)
@@ -855,10 +844,6 @@ class MPS:
 
         return mps_result
 
-
-
-
-
     @property
     def ranks_list(self):
         return [node.dim[0] for node in self] + [self[-1].dim[2]]
@@ -891,9 +876,7 @@ class MPS:
         log_norm = log_norm + torch.log(norm)
 
         for node in self[1:]:
-            result = einsum(
-                result, node.tensor, node.tensor.conj(), "a b, a d p, b d q-> p q"
-            )
+            result = einsum(result, node.tensor, node.tensor.conj(), "a b, a d p, b d q-> p q")
 
             norm = torch.norm(result)
             if norm != 0.0:
@@ -939,9 +922,7 @@ class MPS:
         log_norm = log_norm + torch.log(norm)
 
         for node in self[1:]:
-            result = einsum(
-                result, node.tensor, node.tensor.conj(), "a b,a d p, b d q->p q"
-            )
+            result = einsum(result, node.tensor, node.tensor.conj(), "a b,a d p, b d q->p q")
 
             norm = torch.norm(result)
             if norm != 0.0:
@@ -1006,7 +987,7 @@ def partial_contractions(X: MPS, Y: MPS):
 # MPS GENERATION TOOLS
 
 
-def list_to_mps(A: List[torch.tensor], canonical="None"):
+def list_to_mps(A: list[torch.tensor], canonical="None"):
     nodes = []
     for i, tensor in enumerate(A):
         if i == 0:
@@ -1021,8 +1002,6 @@ def list_to_mps(A: List[torch.tensor], canonical="None"):
     return MPS(nodes)
 
 
-
-
 def identity_mps(L: int, bd: int = 1, pd: int = 2, dtype=torch.float64, device=None):
     device = device if device is not None else default_device()
     M = torch.zeros((bd, pd, bd), dtype=dtype, device=device)
@@ -1030,7 +1009,7 @@ def identity_mps(L: int, bd: int = 1, pd: int = 2, dtype=torch.float64, device=N
         M[:, i, :] = torch.eye(bd, dtype=dtype, device=device)
 
     nodes = [M[:1, :, :]]
-    for i in range(L - 2):
+    for _i in range(L - 2):
         nodes.append(M)
     nodes.append(M[:, :, :1])
 
@@ -1042,8 +1021,6 @@ def ones_mps(L: int, pd: int = 2, dtype=torch.float64, device=None):
     A = random_mps(L, 1, pd, var=1.0, dtype=dtype, device=device)
     A = list_to_mps([torch.ones_like(i.tensor, dtype=dtype, device=device) for i in A])
     return A
-
-
 
 
 def random_mps(
@@ -1066,7 +1043,7 @@ def random_mps(
         diml = dimr
 
         if var == "shape":
-            std = 1.0 / (shape[0])**0.5
+            std = 1.0 / (shape[0]) ** 0.5
         else:
             std = var
         mps.append(
@@ -1087,14 +1064,10 @@ def random_mps(
 # MPS NUMPY/TORCH UTILS
 def mps_to_torch(mps):
     if type(mps[0].tensor) is not torch.Tensor:
-        mps_torch = MPS(
-            [MPS_Node(torch.Tensor(node.tensor).to(device())) for node in mps]
-        )
+        mps_torch = MPS([MPS_Node(torch.Tensor(node.tensor).to(device())) for node in mps])
         return mps_torch
     else:
         return mps
-
-
 
 
 # MPS RANDOMIZED COMPRESSION UTILS
@@ -1139,8 +1112,6 @@ def compression_prod_randomized(mps1, mps2, envs):
 
 def rand_Hadamard_prod(mps1, mps2, bond_final):
     dim = len(mps1)
-    mps_rand = random_mps(
-        dim, bond_final, pd=mps1[0].shape[1], var=1.0, device=mps1[0].device
-    )
+    mps_rand = random_mps(dim, bond_final, pd=mps1[0].shape[1], var=1.0, device=mps1[0].device)
     envs = envs_Hprod(mps1, mps2, mps_rand.tensors)
     return compression_prod_randomized(mps1, mps2, envs)

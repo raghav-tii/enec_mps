@@ -33,9 +33,7 @@ def _tensors_from_sv(
         AssertionError: If the size of the state vector does not match the dimensions (d**L).
     """
 
-    assert torch.numel(sv) == d**L, (
-        "Size of the state vector does not match the dimensions"
-    )
+    assert torch.numel(sv) == d**L, "Size of the state vector does not match the dimensions"
     temp = torch.clone(sv)
     if naive_svd:
         S = torch.ones(1, dtype=temp.dtype, device=temp.device)
@@ -49,7 +47,7 @@ def _tensors_from_sv(
     else:
         A = []
         W = temp.reshape(-1, d)
-        for i in range(L - 1, 0, -1):
+        for _i in range(L - 1, 0, -1):
             Q, R = qr(W)
             U, S, V = svd(R, eps, bdmax)
             A.append(V.reshape(V.shape[0], d, -1))
@@ -129,19 +127,7 @@ def matrix_to_mpo(matrix, d: int, L: int, eps: float = None, bdmax: int = None):
     return mps_to_mpo(vector_to_mps(vec, d**2, L, eps, bdmax)).transpose()
 
 
-
-
-
-
-
-
-
-
-
-
 _MALS_PATHS_CACHE = {}
-
-
 
 
 # TODO Implement the TT-MALS algorithm to compress MPS using DMRG

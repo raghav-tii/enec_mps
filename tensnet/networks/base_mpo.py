@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import List, Union
+from typing import Union
 
 import torch
 from einops import einsum, rearrange
@@ -38,24 +38,18 @@ class MPO_Node:
     ):
         """Applying MPO node on MPS"""
         if isinstance(other, MPS_Node):
-            new_tensor = rearrange(
-                einsum(self.tensor, other.tensor, einstr[0]), einstr[1]
-            )
+            new_tensor = rearrange(einsum(self.tensor, other.tensor, einstr[0]), einstr[1])
             return MPS_Node(new_tensor, boundary=other.boundary)
         if isinstance(other, MPO_Node):
             einstr = ["l i r d, a d b o -> l a i r b o", "l a i r b o->(l a) i (r b) o"]
-            new_tensor = rearrange(
-                einsum(self.tensor, other.tensor, einstr[0]), einstr[1]
-            )
+            new_tensor = rearrange(einsum(self.tensor, other.tensor, einstr[0]), einstr[1])
             return MPO_Node(new_tensor, boundary=other.boundary)
 
     def copy(self):
         """Returns a deep copy of the node with the same attributes."""
         return MPO_Node(self.tensor.detach().clone(), self.canonical, self.boundary)
 
-    def contract(
-        self, other: "MPO_Node", einstr=["l b e, e q r->l b q r", "l b q r-> l (b q) r"]
-    ):
+    def contract(self, other: "MPO_Node", einstr=["l b e, e q r->l b q r", "l b q r-> l (b q) r"]):
         """Given two nodes, and einstein summation notation, contract the corresponding tensors and return the tensor.
 
         Args:
@@ -143,9 +137,7 @@ class MPO:
         mpo_to_mps():
     """
 
-    def __init__(
-        self, nodes: list[MPO_Node] = None, validate: bool = True, canonical=None
-    ):
+    def __init__(self, nodes: list[MPO_Node] = None, validate: bool = True, canonical=None):
         self.canonical = canonical
         if nodes is not None:
             if validate is True:
@@ -196,7 +188,6 @@ class MPO:
             for node in self
         ]
         return MPO(nodes, validate=False)
-
 
     def mpo_to_mps(self):
         # Convert MPO into an mps of physical dimension d^2.
@@ -278,8 +269,6 @@ class MPO:
     #     if isinstance(self, MPO):
     #         return MPO([mpo_node @ node for mpo_node, node in zip(other,self)])
 
-
-
     def left_canonical(self):
         mpo = mps_to_mpo(self.mpo_to_mps().left_canonical())
         mpo.canonical = "left"
@@ -329,7 +318,6 @@ class MPO:
         nodes = [node.transpose() for node in self]
         return MPO(nodes)
 
-
     def conj(self):
         result = MPO([node.conj() for node in self])
         return result
@@ -362,9 +350,7 @@ class MPO:
         mps = self.mpo_to_mps()
         return mps.sum()
 
-    def query(
-        self, inds_x: Union[int, List[int], slice], inds_y: Union[int, List[int], slice]
-    ):
+    def query(self, inds_x: int | list[int] | slice, inds_y: int | list[int] | slice):
         d = self[0].shape[1]
         L = len(self)
         if isinstance(inds_x, int):
@@ -393,7 +379,7 @@ class MPO:
         return queries.reshape(len(inds_x), len(inds_y)).squeeze()
 
 
-def list_to_mpo(A: List):
+def list_to_mpo(A: list):
     nodes = []
     for i, tensor in enumerate(A):
         if i == 0:
@@ -405,8 +391,6 @@ def list_to_mpo(A: List):
     return MPO(nodes)
 
 
-
-
 def mps_mpo_col_mul(mps: MPS, mpo: MPO):
     assert len(mps) == len(mpo)
     einstr = ["l u r, s d t u->l s d r t u", "l s d r t u-> (l s) d (r t) u"]
@@ -414,8 +398,6 @@ def mps_mpo_col_mul(mps: MPS, mpo: MPO):
     for node1, node2 in zip(mps, mpo):
         result.append(MPO_Node(node1.contract(node2, einstr)))
     return MPO(result)
-
-
 
 
 def mps_to_mpo(mps: MPS):
@@ -449,7 +431,3 @@ def identity_mpo_node(bd: int = 1, pd: int = 2, dtype=torch.float64, device=None
 
 def random_mpo(L: int, bd: int = 1, pd: int = 2, var="shape"):
     return mps_to_mpo(random_mps(L, bd, pd**2, var))
-
-
-
-

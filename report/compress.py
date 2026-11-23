@@ -2,25 +2,47 @@
 
     python3 compress.py
 
-Samples data/star_ccm/star_t2500.vtk onto the grid the way the solver's warm start does (nearest cell),
-orders the 20 binary digits as the solver does (x and y interleaved, most significant first), and runs a
-TT-SVD capped at each bond dimension.
+Samples data/star_ccm/star_t2500.vtk onto the grid the way the solver's warm start does
+(nearest cell), orders the 20 binary digits as the solver does (x and y interleaved, most
+significant first), and runs a TT-SVD capped at each bond dimension.
 Writes   data/archive/compress.json
 Used by  plots.py.
 """
+
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 from scipy.spatial import cKDTree
 
+from _paths import OUT
 from star import DATA, star_on_grid
 from star_vtk import read_star_vtk
-from _paths import OUT
 
 Q, CHIS = 10, (5, 10, 20, 40, 80, 160, 320)
 
 
+# ---- Truncation error against bond dimension ---------------------------------
+def main():
+    selfcheck()
+    star_on_grid(np.zeros(1), np.zeros(1))  # make sure the VTK is cached
+    xy, cells = read_star_vtk(os.path.join(DATA, "star_t2500.vtk"))
+    vals = np.column_stack([cells["Velocity"][:, :2], cells["Pressure"]])
+    F = np.load(f"{OUT}/fields.npz")
+    cen, h = F["centres"], 2.0 / 2 ** int(F["cfg_Lf"])
+    g = (np.arange(2**Q) - cen[:, 0].mean()) * h, (np.arange(2**Q) - cen[:, 1].mean()) * h
+    GX, GY = np.meshgrid(*g, indexing="ij")
+    near = vals[cKDTree(xy).query(np.column_stack([GX.ravel(), GY.ravel()]))[1]]
+    res = {}
+    for c, name in enumerate(("u", "v", "p")):
+        T = interleave(near[:, c].reshape(2**Q, 2**Q))
+        res[name] = {chi: tt_error(T, chi) for chi in CHIS}
+        print(name, {k: f"{v:.2e}" for k, v in res[name].items()}, flush=True)
+    Path(f"{OUT}/compress.json").write_text(json.dumps(res, indent=1))
+
+
+# ---- TT-SVD ------------------------------------------------------------------
 def tt_error(T, chi):
     """Relative error of T after a left-to-right TT-SVD with bond dimension <= chi."""
     C, r, cores = T.reshape(1, -1), 1, []
@@ -31,7 +53,9 @@ def tt_error(T, chi):
         C, r = S[:k, None] * Vt[:k], k
     out = C.reshape(r, 2)
     for core in reversed(cores):
-        out = np.tensordot(core, out.reshape(core.shape[2], -1), axes=(2, 0)).reshape(core.shape[0], -1)
+        out = np.tensordot(core, out.reshape(core.shape[2], -1), axes=(2, 0)).reshape(
+            core.shape[0], -1
+        )
     return float(np.linalg.norm(out.ravel() - T) / np.linalg.norm(T))
 
 
@@ -49,18 +73,4 @@ def selfcheck():
 
 
 if __name__ == "__main__":
-    selfcheck()
-    star_on_grid(np.zeros(1), np.zeros(1))  # make sure the VTK is cached
-    xy, cells = read_star_vtk(os.path.join(DATA, "star_t2500.vtk"))
-    vals = np.column_stack([cells["Velocity"][:, :2], cells["Pressure"]])
-    F = np.load(f"{OUT}/fields.npz")
-    cen, h = F["centres"], 2.0 / 2 ** int(F["cfg_Lf"])
-    g = (np.arange(2**Q) - cen[:, 0].mean()) * h, (np.arange(2**Q) - cen[:, 1].mean()) * h
-    GX, GY = np.meshgrid(*g, indexing="ij")
-    near = vals[cKDTree(xy).query(np.column_stack([GX.ravel(), GY.ravel()]))[1]]
-    res = {}
-    for c, name in enumerate(("u", "v", "p")):
-        T = interleave(near[:, c].reshape(2**Q, 2**Q))
-        res[name] = {chi: tt_error(T, chi) for chi in CHIS}
-        print(name, {k: f"{v:.2e}" for k, v in res[name].items()}, flush=True)
-    json.dump(res, open(f"{OUT}/compress.json", "w"), indent=1)
+    main()

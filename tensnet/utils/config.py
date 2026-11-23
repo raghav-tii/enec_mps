@@ -26,11 +26,13 @@ def ARCH_2D():
 def COMPRESS_METHOD():
     return __compress_method
 
+
 def NORM_PRESERVATION():
     return __preserve_norm
 
+
 def parameters(key=None):
-    if key in ["ax", "bx", "ay", "by", "Lx", "Ly"] and key not in __parameters.keys():
+    if key in ["ax", "bx", "ay", "by", "Lx", "Ly"] and key not in __parameters:
         return __parameters[key[0]]
     elif key is not None:
         return __parameters[key]

@@ -41,11 +41,14 @@ torch.set_default_dtype(torch.float64)
 # The MPO builders read tensnet's global qubit ordering; shuffle_axis encoding
 # only matches them under "sequential".  See bundle_simulation.py for the measurement.
 tt.set_arch("sequential")
+
 tt.set_param("low_acc", False)
 
 PERIODIC = ["periodic"] * 4
+
 # Inflow at x=ax, outflow at x=bx, periodic side walls -- the bundle case.
 BCV_CHANNEL = ["dirichlet", "neumann", "periodic", "periodic"]
+
 BCP_CHANNEL = ["neumann", "dirichlet", "periodic", "periodic"]
 
 
@@ -58,8 +61,7 @@ class Operators:
     the coincidence that two separately-built stencils agree.
     """
 
-    def __init__(self, Q, dx, dy=None, bcv=None, bcp=None, inflow_rows=4, held=False,
-                 inflow=None):
+    def __init__(self, Q, dx, dy=None, bcv=None, bcp=None, inflow_rows=4, held=False, inflow=None):
         dy = dx if dy is None else dy
         bcv = PERIODIC if bcv is None else bcv
         bcp = bcv if bcp is None else bcp
@@ -73,9 +75,9 @@ class Operators:
         def d2(axis, bc, h):
             return tt.get_diff_mpo(dim=2, order=2, axis=axis, nofq=nofq, bc=bc) * (1.0 / h**2)
 
-        self.Dx, self.Dy = d1(0, bcv, dx), d1(1, bcv, dy)          # velocity
-        self.Gx, self.Gy = d1(0, bcp, dx), d1(1, bcp, dy)          # pressure
-        self.Dxx, self.Dyy = d2(0, bcv, dx), d2(1, bcv, dy)        # viscous
+        self.Dx, self.Dy = d1(0, bcv, dx), d1(1, bcv, dy)  # velocity
+        self.Gx, self.Gy = d1(0, bcp, dx), d1(1, bcp, dy)  # pressure
+        self.Dxx, self.Dyy = d2(0, bcv, dx), d2(1, bcv, dy)  # viscous
         # The Poisson operator is div(grad(.)) COMPOSED from the very
         # operators the projection uses, not a pair of second-difference
         # MPOs.  Built the latter way the two agree to 6e-11 in the interior
@@ -104,8 +106,7 @@ class Operators:
         # step and the mean ux read 0.0000 in every column.
         self.hold = None
         if inflow_rows and (bcv[0] != "periodic" or bcv[1] != "periodic"):
-            idx = list(range(inflow_rows)) + \
-                  list(range(2**Q - inflow_rows, 2**Q))
+            idx = list(range(inflow_rows)) + list(range(2**Q - inflow_rows, 2**Q))
             rows = tt.row_mpo(Q, idx[0])
             for i in idx[1:]:
                 rows = rows + tt.row_mpo(Q, i)
@@ -139,14 +140,16 @@ class Operators:
         if held:
             if self.hold is None:
                 raise ValueError("held=True needs held boundary rows (non-periodic x)")
-            self.lap = ((self.Gx @ self.hold @ self.Dx @ self.hold)
-                        + (self.Gy @ self.Dy @ self.hold)
-                        + tt.get_2D_operator(rows * tt.identity_mpo(Q), 0, nofq)
-                        * -(1.0 / dx**2 + 1.0 / dy**2))
+            self.lap = (
+                (self.Gx @ self.hold @ self.Dx @ self.hold)
+                + (self.Gy @ self.Dy @ self.hold)
+                + tt.get_2D_operator(rows * tt.identity_mpo(Q), 0, nofq)
+                * -(1.0 / dx**2 + 1.0 / dy**2)
+            )
             n, r = 2**Q, inflow_rows
             copy = np.eye(n)
-            copy[n - r:] = 0.0
-            copy[n - r:, n - r - 1] = 1.0
+            copy[n - r :] = 0.0
+            copy[n - r :, n - r - 1] = 1.0
             copy = torch.as_tensor(copy, device=self.Dx.nodes[0].tensor.device)
             self.outflow = tt.get_2D_operator(tt.matrix_to_mpo(copy, 2, Q, 1e-14), 0, nofq)
 
@@ -166,9 +169,14 @@ class Operators:
             keep_in[:inflow_rows] = 0.0
             band = np.zeros((2**Q, 2**Q))
             band[:inflow_rows] = float(inflow)
-            self.pin = (tt.get_2D_operator(tt.matrix_to_mpo(
-                            torch.as_tensor(np.diag(keep_in), device=dev), 2, Q, 1e-14), 0, nofq),
-                        grid_to_mps(band, Q).to(device=dev))
+            self.pin = (
+                tt.get_2D_operator(
+                    tt.matrix_to_mpo(torch.as_tensor(np.diag(keep_in), device=dev), 2, Q, 1e-14),
+                    0,
+                    nofq,
+                ),
+                grid_to_mps(band, Q).to(device=dev),
+            )
 
     def held(self, m):
         """Zero an increment in the boundary rows, leaving the rest alone."""
@@ -180,85 +188,6 @@ class Operators:
 
     def laplacian(self, f):
         return self.Dxx.apply(f) + self.Dyy.apply(f)
-
-
-@contextlib.contextmanager
-def compression_limits(eps, bd="keep"):
-    """Pin tensnet's global compression accuracy and bond-dimension cap."""
-    saved_a, saved_b = tt.COMP_ACC(), tt.BD_LIMIT()
-    tt.set_accuracy(eps)
-    if bd != "keep":
-        tt.set_bd_limit(bd)
-    try:
-        yield
-    finally:
-        tt.set_accuracy(saved_a)
-        tt.set_bd_limit(saved_b)
-
-
-@contextlib.contextmanager
-def pinned_accuracy(eps):
-    """Pin tensnet's global compression accuracy for a block of work.
-
-    MPS arithmetic compresses against the global COMP_ACC, not against the
-    accuracy handed to compress(), so every routine here that adds or
-    multiplies MPS has to set it.  Without this the module silently inherits
-    whatever the caller left behind -- at the 1e-6 default the projection
-    leaves 4e-02 of the divergence it removes completely at 1e-12, which
-    reads as a broken projection rather than a loose tolerance.
-    """
-    saved = tt.COMP_ACC()
-    tt.set_accuracy(eps)
-    try:
-        yield
-    finally:
-        tt.set_accuracy(saved)
-
-
-def predict_velocity(ux, uy, ops, dt, nu, mask=None, eps=1e-12, max_bd=None,
-              pressure=None, rk4=False):
-    """Explicit advection + diffusion, then the mask.
-
-    Masking here rather than after the projection is the whole point: the
-    projection that follows removes the divergence the mask introduces.
-
-    `rk4` takes a classical RK4 step (pressure gradient frozen over the step,
-    every stage masked and trimmed) instead of forward Euler.  Euler with
-    these eighth-order central differences is linearly unstable on the
-    bundle: at CFL 0.4 / cell Re 6.25 the real Q=10 operators, boundary rows
-    included, give |G| = 1.11 per step at U and 1.39 at 1.33U, and the exact-
-    arithmetic twin (uncompressed_twin.py) blows up after ~45 steps.  The MPS runs stayed
-    bounded only because truncation damped the growing modes.  RK4 gives
-    |G| <= 1 to 2U at the same dt, for four right-hand-side evaluations.
-    """
-    with pinned_accuracy(eps):
-        def rhs(u, v):
-            ix = (u * ops.Dx.apply(u) + v * ops.Dy.apply(u)) * (-1.0) + ops.laplacian(u) * nu
-            iy = (u * ops.Dx.apply(v) + v * ops.Dy.apply(v)) * (-1.0) + ops.laplacian(v) * nu
-            if pressure is not None:
-                # The incremental term.  With it, phi is only the *change* in
-                # pressure over a step rather than the whole of it, which is what
-                # keeps p = phi/dt from amplifying the solve error by 1/dt.
-                ix = ix + ops.Gx.apply(pressure) * (-1.0)
-                iy = iy + ops.Gy.apply(pressure) * (-1.0)
-            return ops.held(ix), ops.held(iy)
-
-        def stage(c, k):
-            u, v = ux + k[0] * (c * dt), uy + k[1] * (c * dt)
-            if mask is not None:
-                u, v = u * mask, v * mask
-            if ops.outflow is not None:
-                u, v = ops.outflow.apply(u), ops.outflow.apply(v)
-            return _compress_mps(u, eps, max_bd), _compress_mps(v, eps, max_bd)
-
-        k = rhs(ux, uy)
-        if rk4:
-            k2 = rhs(*stage(0.5, k))
-            k3 = rhs(*stage(0.5, k2))
-            k4 = rhs(*stage(1.0, k3))
-            k = tuple((a + b * 2.0 + c * 2.0 + d) * (1.0 / 6.0)
-                      for a, b, c, d in zip(k, k2, k3, k4))
-        return stage(1.0, k)
 
 
 POISSON_SOLVER = "amen"
@@ -282,30 +211,190 @@ this problem beyond the asymmetry, and AMEn is the solver to use.
 """
 
 
-def _solve_poisson(A, b, x0, eps, max_rank, opt_iter, solver, local_solver):
-    """Solve A phi = b with whichever tensnet routine was asked for.
+# ---- Time stepping -----------------------------------------------------------
+def march_in_time(
+    ux,
+    uy,
+    ops,
+    dt,
+    nu,
+    Nt,
+    mask=None,
+    eps=1e-12,
+    max_bd=None,
+    opt_iter=6,
+    uid=None,
+    outdir="results/temp",
+    local_solver=None,
+    report=10,
+    solver=POISSON_SOLVER,
+    pressure=None,
+    rotational=True,
+    rhs_bd=None,
+    guard=1.0,
+    plain=False,
+    rk4=False,
+    phi_bd=None,
+):
+    """Advance Nt steps, writing one (ux, uy, p) snapshot per step.
 
-    Measured on this operator (Q=8, rank 40, 6 sweeps): dmrg2 with its
-    default dense supercore solve takes 72s for a 1.6e-03 residual; AMEn
-    takes 4.9s for 7.0e-02 and 65s for 2.1e-03, so it is a genuinely
-    cheaper operating point only if a loose solve per step suffices.
-    Every iterative local solver -- cg, gmres, matfree -- was slower than
-    the direct one for identical accuracy, so `local_solver` is offered but
-    not recommended.
+    The per-step divergence is printed as |div u| * dx / |u|, dimensionless
+    and O(1) when the projection has failed.  Every blow-up seen so far
+    announced itself in that number long before the velocity misbehaved, so
+    it is worth the one extra operator application per report.
+
+    No outlet correction term.  tensnet's loop adds one to the right-hand
+    side every step without resetting it, which grows |b| by 33% per step;
+    here the pressure simply carries the homogeneous condition its BC set
+    already implies, which is the standard p=0 outflow choice anyway.
+
+    `plain` never feeds the pressure back into the predictor (plain Chorin,
+    p = phi/dt each step); the pressure is still computed and saved.
     """
-    if solver == "amen":
-        sol = tt.linsys_amen(A=A, b=b, x=x0, max_rank=max_rank,
-                             max_iter=opt_iter, eps=eps)
-        return sol[0] * torch.exp(sol[1]) if isinstance(sol, tuple) else sol
-    sol = tt.linsys_dmrg2(A=A, b=b, x=x0, trunc_eps=eps, max_iter=opt_iter,
-                          max_rank=max_rank, local_solver=local_solver,
-                          verbose=False)
-    return sol[0] * torch.exp(sol[1])
+    import time
+
+    solx, soly, solp = [], [], []
+    guess = None
+    for i in range(Nt):
+        t0 = time.time()
+        # A chunk's first solve starts cold (no previous phi).  At Q=11 six
+        # AMEn sweeps from that start left a relative residual of 2.1-2.9
+        # on the warm-started bundle, which the guard rightly rejects; twelve
+        # reach 0.56.  Later steps start from the previous phi.
+        ux, uy, pressure, guess = projection_step(
+            ux,
+            uy,
+            ops,
+            dt,
+            nu,
+            mask,
+            eps,
+            max_bd,
+            opt_iter if guess is not None else max(opt_iter, 12),
+            guess=guess,
+            local_solver=local_solver,
+            solver=solver,
+            pressure=None if plain else pressure,
+            rotational=rotational,
+            rhs_bd=rhs_bd,
+            guard=guard,
+            rk4=rk4,
+            phi_bd=phi_bd,
+        )
+        # kept and saved from the CPU: a pickled CUDA tensor does not load on
+        # a machine without one, and a chunk's history would fill the GPU
+        cx, cy, pr = (m.to(device="cpu") for m in (ux, uy, pressure))
+        solx.append(cx)
+        soly.append(cy)
+        solp.append(pr)
+        if uid is not None:
+            os.makedirs(outdir, exist_ok=True)
+            tt.save_object((cx, cy, pr), os.path.join(outdir, f"{uid}_int_sol_{i}.tmp"))
+        if report and (i % report == 0 or i == Nt - 1):
+            # Report the divergence over the rows the projection actually
+            # targets.  The eight boundary rows are never corrected -- the
+            # difference stencil is unusable there -- and including them
+            # reads 5.3e-02 where the interior is 2.3e-05, which would make
+            # every healthy run look broken.
+            div = ops.divergence(ux, uy)
+            scale = ops.dx / float(ux.norm)
+            d = float(ops.held(div).norm) * scale
+            res = getattr(project_divergence_free, "last_residual", float("nan"))
+            print(
+                f"  step {i:5d}  t={(i + 1) * dt:.4e}  |u|={float(ux.norm):.4e}"
+                f"  |div|dx/|u|={d:.3e} (edges {float(div.norm) * scale:.1e})"
+                f"  poisson={res:.1e}  rank={int(ux.max_rank)}"
+                f"  {time.time() - t0:.1f}s",
+                flush=True,
+            )
+            if not np.isfinite(d) or d > 0.5:
+                raise RuntimeError(
+                    f"projection failed at step {i}: |div| dx / |u| = {d:.3e}. "
+                    f"The velocity is not divergence-free, so the run is "
+                    f"meaningless from here. Lower the timestep or raise "
+                    f"--opt-iter / --max-bd."
+                )
+    return solx, soly, solp
 
 
-def project_divergence_free(us, vs, ops, dt, eps=1e-12, max_bd=None, opt_iter=6,
-            max_rank=None, guess=None, local_solver=None,
-            solver=POISSON_SOLVER, rhs_bd=None, guard=1.0):
+def projection_step(
+    ux,
+    uy,
+    ops,
+    dt,
+    nu,
+    mask=None,
+    eps=1e-12,
+    max_bd=None,
+    opt_iter=6,
+    guess=None,
+    local_solver=None,
+    solver=POISSON_SOLVER,
+    pressure=None,
+    rotational=True,
+    rhs_bd=None,
+    guard=1.0,
+    rk4=False,
+    phi_bd=None,
+):
+    """One step of rotational incremental pressure-correction.
+
+    Plain Chorin sets p = phi/dt, so phi carries the entire pressure and its
+    absolute error is amplified by 1/dt -- 2560x at dt=3.9e-4.  Measured on
+    the warm-started bundle, that put the computed pressure 5x to 94x above
+    the Star-CCM+ field with no trend over fourteen steps, while the
+    velocity stayed healthy.  Carrying p instead makes phi the per-step
+    *change*, which vanishes at a steady state.
+
+    That also makes a steady solution an exact fixed point: if (u, p)
+    balances the momentum equation then u* = u, so div(u*) = 0, phi = 0, and
+    neither u nor p moves.  Starting from the reference and staying there is
+    the whole validation.
+
+    `rotational` adds the -nu*div(u*) term (Timmermans), which removes the
+    O(dt) pressure boundary layer plain incremental leaves behind -- worth
+    having because the control-volume force integrates pressure exactly
+    where that error sits.
+    """
+    us, vs = predict_velocity(ux, uy, ops, dt, nu, mask, eps, max_bd, pressure, rk4)
+    nx, ny, dp, phi = project_divergence_free(
+        us,
+        vs,
+        ops,
+        dt,
+        eps,
+        max_bd,
+        opt_iter,
+        max_rank=phi_bd,
+        guess=guess,
+        local_solver=local_solver,
+        solver=solver,
+        rhs_bd=rhs_bd,
+        guard=guard,
+    )
+    with pinned_accuracy(eps):
+        p_new = dp if pressure is None else pressure + dp
+        if rotational:
+            p_new = p_new + ops.held(ops.divergence(us, vs)) * (-nu)
+        p_new = _compress_mps(p_new, eps, max_bd)
+    return nx, ny, p_new, phi
+
+
+def project_divergence_free(
+    us,
+    vs,
+    ops,
+    dt,
+    eps=1e-12,
+    max_bd=None,
+    opt_iter=6,
+    max_rank=None,
+    guess=None,
+    local_solver=None,
+    solver=POISSON_SOLVER,
+    rhs_bd=None,
+    guard=1.0,
+):
     """Remove the divergence of (us, vs).
 
     Solves lap(phi) = div(u*) and returns u* - grad(phi) together with the
@@ -334,8 +423,9 @@ def project_divergence_free(us, vs, ops, dt, eps=1e-12, max_bd=None, opt_iter=6,
         # (poisson_rank_benchmark.py), and every solver variant sits at that floor.
         # The global BD_LIMIT is lifted to match for the solve.
         with compression_limits(eps, max_rank or "keep"):
-            phi = _solve_poisson(ops.lap, b, x0, eps, max_rank or max_bd or 40,
-                           opt_iter, solver, local_solver)
+            phi = _solve_poisson(
+                ops.lap, b, x0, eps, max_rank or max_bd or 40, opt_iter, solver, local_solver
+            )
         # Verify the solve. None of the projection failures chased through
         # this module were visible because nothing ever checked: dmrg2 was
         # returning a phi with relative residual 1.600 -- worse than zero --
@@ -382,7 +472,9 @@ def project_divergence_free(us, vs, ops, dt, eps=1e-12, max_bd=None, opt_iter=6,
                 gx, gy = ops.held(gx), ops.held(gy)
             ux = _compress_mps(us + gx * (-1.0), eps, max_bd)
             uy = _compress_mps(vs + gy * (-1.0), eps, max_bd)
-        if ops.pin is not None:  # cap lifted: bundle_simulation sets a global BD_LIMIT, which would re-truncate
+        if (
+            ops.pin is not None
+        ):  # cap lifted: bundle_simulation sets a global BD_LIMIT, which would re-truncate
             # Then back to the fields' cap: the pinned sum carries the inflow
             # rows' truncation noise twice over and doubles the rank (Q=11:
             # 40 -> 81, the next products cost accordingly).  Trimming costs
@@ -395,132 +487,155 @@ def project_divergence_free(us, vs, ops, dt, eps=1e-12, max_bd=None, opt_iter=6,
         return ux, uy, phi * (1.0 / dt), phi
 
 
-def projection_step(ux, uy, ops, dt, nu, mask=None, eps=1e-12, max_bd=None, opt_iter=6,
-         guess=None, local_solver=None, solver=POISSON_SOLVER,
-         pressure=None, rotational=True, rhs_bd=None, guard=1.0, rk4=False,
-         phi_bd=None):
-    """One step of rotational incremental pressure-correction.
+def predict_velocity(
+    ux, uy, ops, dt, nu, mask=None, eps=1e-12, max_bd=None, pressure=None, rk4=False
+):
+    """Explicit advection + diffusion, then the mask.
 
-    Plain Chorin sets p = phi/dt, so phi carries the entire pressure and its
-    absolute error is amplified by 1/dt -- 2560x at dt=3.9e-4.  Measured on
-    the warm-started bundle, that put the computed pressure 5x to 94x above
-    the Star-CCM+ field with no trend over fourteen steps, while the
-    velocity stayed healthy.  Carrying p instead makes phi the per-step
-    *change*, which vanishes at a steady state.
+    Masking here rather than after the projection is the whole point: the
+    projection that follows removes the divergence the mask introduces.
 
-    That also makes a steady solution an exact fixed point: if (u, p)
-    balances the momentum equation then u* = u, so div(u*) = 0, phi = 0, and
-    neither u nor p moves.  Starting from the reference and staying there is
-    the whole validation.
-
-    `rotational` adds the -nu*div(u*) term (Timmermans), which removes the
-    O(dt) pressure boundary layer plain incremental leaves behind -- worth
-    having because the control-volume force integrates pressure exactly
-    where that error sits.
+    `rk4` takes a classical RK4 step (pressure gradient frozen over the step,
+    every stage masked and trimmed) instead of forward Euler.  Euler with
+    these eighth-order central differences is linearly unstable on the
+    bundle: at CFL 0.4 / cell Re 6.25 the real Q=10 operators, boundary rows
+    included, give |G| = 1.11 per step at U and 1.39 at 1.33U, and the exact-
+    arithmetic twin (uncompressed_twin.py) blows up after ~45 steps.  The MPS runs stayed
+    bounded only because truncation damped the growing modes.  RK4 gives
+    |G| <= 1 to 2U at the same dt, for four right-hand-side evaluations.
     """
-    us, vs = predict_velocity(ux, uy, ops, dt, nu, mask, eps, max_bd, pressure, rk4)
-    nx, ny, dp, phi = project_divergence_free(us, vs, ops, dt, eps, max_bd, opt_iter,
-                              max_rank=phi_bd, guess=guess, local_solver=local_solver,
-                              solver=solver, rhs_bd=rhs_bd, guard=guard)
     with pinned_accuracy(eps):
-        p_new = dp if pressure is None else pressure + dp
-        if rotational:
-            p_new = p_new + ops.held(ops.divergence(us, vs)) * (-nu)
-        p_new = _compress_mps(p_new, eps, max_bd)
-    return nx, ny, p_new, phi
+
+        def rhs(u, v):
+            ix = (u * ops.Dx.apply(u) + v * ops.Dy.apply(u)) * (-1.0) + ops.laplacian(u) * nu
+            iy = (u * ops.Dx.apply(v) + v * ops.Dy.apply(v)) * (-1.0) + ops.laplacian(v) * nu
+            if pressure is not None:
+                # The incremental term.  With it, phi is only the *change* in
+                # pressure over a step rather than the whole of it, which is what
+                # keeps p = phi/dt from amplifying the solve error by 1/dt.
+                ix = ix + ops.Gx.apply(pressure) * (-1.0)
+                iy = iy + ops.Gy.apply(pressure) * (-1.0)
+            return ops.held(ix), ops.held(iy)
+
+        def stage(c, k):
+            u, v = ux + k[0] * (c * dt), uy + k[1] * (c * dt)
+            if mask is not None:
+                u, v = u * mask, v * mask
+            if ops.outflow is not None:
+                u, v = ops.outflow.apply(u), ops.outflow.apply(v)
+            return _compress_mps(u, eps, max_bd), _compress_mps(v, eps, max_bd)
+
+        k = rhs(ux, uy)
+        if rk4:
+            k2 = rhs(*stage(0.5, k))
+            k3 = rhs(*stage(0.5, k2))
+            k4 = rhs(*stage(1.0, k3))
+            k = tuple(
+                (a + b * 2.0 + c * 2.0 + d) * (1.0 / 6.0) for a, b, c, d in zip(k, k2, k3, k4)
+            )
+        return stage(1.0, k)
 
 
-def march_in_time(ux, uy, ops, dt, nu, Nt, mask=None, eps=1e-12, max_bd=None,
-          opt_iter=6, uid=None, outdir="results/temp", local_solver=None,
-          report=10, solver=POISSON_SOLVER, pressure=None,
-          rotational=True, rhs_bd=None, guard=1.0, plain=False, rk4=False,
-          phi_bd=None):
-    """Advance Nt steps, writing one (ux, uy, p) snapshot per step.
+def _solve_poisson(A, b, x0, eps, max_rank, opt_iter, solver, local_solver):
+    """Solve A phi = b with whichever tensnet routine was asked for.
 
-    The per-step divergence is printed as |div u| * dx / |u|, dimensionless
-    and O(1) when the projection has failed.  Every blow-up seen so far
-    announced itself in that number long before the velocity misbehaved, so
-    it is worth the one extra operator application per report.
-
-    No outlet correction term.  tensnet's loop adds one to the right-hand
-    side every step without resetting it, which grows |b| by 33% per step;
-    here the pressure simply carries the homogeneous condition its BC set
-    already implies, which is the standard p=0 outflow choice anyway.
-
-    `plain` never feeds the pressure back into the predictor (plain Chorin,
-    p = phi/dt each step); the pressure is still computed and saved.
+    Measured on this operator (Q=8, rank 40, 6 sweeps): dmrg2 with its
+    default dense supercore solve takes 72s for a 1.6e-03 residual; AMEn
+    takes 4.9s for 7.0e-02 and 65s for 2.1e-03, so it is a genuinely
+    cheaper operating point only if a loose solve per step suffices.
+    Every iterative local solver -- cg, gmres, matfree -- was slower than
+    the direct one for identical accuracy, so `local_solver` is offered but
+    not recommended.
     """
-    import time
+    if solver == "amen":
+        sol = tt.linsys_amen(A=A, b=b, x=x0, max_rank=max_rank, max_iter=opt_iter, eps=eps)
+        return sol[0] * torch.exp(sol[1]) if isinstance(sol, tuple) else sol
+    sol = tt.linsys_dmrg2(
+        A=A,
+        b=b,
+        x=x0,
+        trunc_eps=eps,
+        max_iter=opt_iter,
+        max_rank=max_rank,
+        local_solver=local_solver,
+        verbose=False,
+    )
+    return sol[0] * torch.exp(sol[1])
 
-    solx, soly, solp = [], [], []
-    guess = None
-    for i in range(Nt):
-        t0 = time.time()
-        # A chunk's first solve starts cold (no previous phi).  At Q=11 six
-        # AMEn sweeps from that start left a relative residual of 2.1-2.9
-        # on the warm-started bundle, which the guard rightly rejects; twelve
-        # reach 0.56.  Later steps start from the previous phi.
-        ux, uy, pressure, guess = projection_step(ux, uy, ops, dt, nu, mask, eps,
-                                       max_bd, opt_iter if guess is not None else max(opt_iter, 12),
-                                       guess=guess,
-                                       local_solver=local_solver,
-                                       solver=solver,
-                                       pressure=None if plain else pressure,
-                                       rotational=rotational, rhs_bd=rhs_bd,
-                                       guard=guard, rk4=rk4, phi_bd=phi_bd)
-        # kept and saved from the CPU: a pickled CUDA tensor does not load on
-        # a machine without one, and a chunk's history would fill the GPU
-        cx, cy, pr = (m.to(device="cpu") for m in (ux, uy, pressure))
-        solx.append(cx)
-        soly.append(cy)
-        solp.append(pr)
-        if uid is not None:
-            os.makedirs(outdir, exist_ok=True)
-            tt.save_object((cx, cy, pr),
-                           os.path.join(outdir, f"{uid}_int_sol_{i}.tmp"))
-        if report and (i % report == 0 or i == Nt - 1):
-            # Report the divergence over the rows the projection actually
-            # targets.  The eight boundary rows are never corrected -- the
-            # difference stencil is unusable there -- and including them
-            # reads 5.3e-02 where the interior is 2.3e-05, which would make
-            # every healthy run look broken.
-            div = ops.divergence(ux, uy)
-            scale = ops.dx / float(ux.norm)
-            d = float(ops.held(div).norm) * scale
-            res = getattr(project_divergence_free, "last_residual", float("nan"))
-            print(f"  step {i:5d}  t={(i + 1) * dt:.4e}  |u|={float(ux.norm):.4e}"
-                  f"  |div|dx/|u|={d:.3e} (edges {float(div.norm) * scale:.1e})"
-                  f"  poisson={res:.1e}  rank={int(ux.max_rank)}"
-                  f"  {time.time() - t0:.1f}s",
-                  flush=True)
-            if not np.isfinite(d) or d > 0.5:
-                raise RuntimeError(
-                    f"projection failed at step {i}: |div| dx / |u| = {d:.3e}. "
-                    f"The velocity is not divergence-free, so the run is "
-                    f"meaningless from here. Lower the timestep or raise "
-                    f"--opt-iter / --max-bd.")
-    return solx, soly, solp
+
+# ---- Compression settings ----------------------------------------------------
+@contextlib.contextmanager
+def compression_limits(eps, bd="keep"):
+    """Pin tensnet's global compression accuracy and bond-dimension cap."""
+    saved_a, saved_b = tt.COMP_ACC(), tt.BD_LIMIT()
+    tt.set_accuracy(eps)
+    if bd != "keep":
+        tt.set_bd_limit(bd)
+    try:
+        yield
+    finally:
+        tt.set_accuracy(saved_a)
+        tt.set_bd_limit(saved_b)
+
+
+@contextlib.contextmanager
+def pinned_accuracy(eps):
+    """Pin tensnet's global compression accuracy for a block of work.
+
+    MPS arithmetic compresses against the global COMP_ACC, not against the
+    accuracy handed to compress(), so every routine here that adds or
+    multiplies MPS has to set it.  Without this the module silently inherits
+    whatever the caller left behind -- at the 1e-6 default the projection
+    leaves 4e-02 of the divergence it removes completely at 1e-12, which
+    reads as a broken projection rather than a loose tolerance.
+    """
+    saved = tt.COMP_ACC()
+    tt.set_accuracy(eps)
+    try:
+        yield
+    finally:
+        tt.set_accuracy(saved)
 
 
 def _compress_mps(m, eps, max_bd):
     return m.compress(max_bd=max_bd, accuracy=eps) if max_bd else m.compress(accuracy=eps)
 
 
-# --- encode / decode ---------------------------------------------------------
+# ---- Encode and decode -------------------------------------------------------
 def grid_to_mps(field, Q, eps=1e-12):
-    return tt.vector_to_mps(
-        tt.shuffle_axis(torch.as_tensor(field), Q).flatten(), 2, 2 * Q, eps)
+    return tt.vector_to_mps(tt.shuffle_axis(torch.as_tensor(field), Q).flatten(), 2, 2 * Q, eps)
 
 
 def mps_to_grid(m, Q):
     return tt.unshuffle_axis(m.contract(), Q, 2).numpy()
 
 
-# --- tests -------------------------------------------------------------------
-def _unit_square_grid(Q):
-    n = 2**Q
-    g = np.linspace(0.0, 1.0, n)
-    return np.meshgrid(g, g, indexing="ij"), 1.0 / (n - 1)
+# ---- Test suite (python3 chorin_projection.py) -------------------------------
+def selfcheck():
+    tests = [
+        test_projection_identity,
+        test_projection_removes_divergence,
+        test_divergence_free_is_preserved,
+        test_mask_before_projection,
+        test_boundary_rows_are_clean,
+        test_inflow_is_held,
+        test_held_projection_keeps_inflow,
+        test_steady_state_is_a_fixed_point,
+        test_taylor_green,
+    ]
+    import time
+
+    bad = 0
+    for fn in tests:
+        t0 = time.time()
+        try:
+            msg = fn()
+            print(f"  PASS  [{time.time() - t0:5.1f}s] {msg}", flush=True)
+        except AssertionError as exc:
+            print(f"  FAIL  [{time.time() - t0:5.1f}s] {fn.__name__}: {exc}", flush=True)
+            bad += 1
+    print("chorin_projection: OK" if not bad else f"chorin_projection: {bad} FAILED")
+    return bad
 
 
 def test_projection_identity(Q=7):
@@ -558,8 +673,9 @@ def test_projection_removes_divergence(Q=6):
     chi = grid_to_mps(np.sin(2 * np.pi * X) * np.sin(2 * np.pi * Y), Q)
     us, vs = ops.Gx.apply(chi), ops.Gy.apply(chi)
     n0 = float(us.norm)
-    ux, uy, _, _ = project_divergence_free(us, vs, ops, dt=1e-3, opt_iter=12, max_rank=32,
-                           max_bd=32)
+    ux, uy, _, _ = project_divergence_free(
+        us, vs, ops, dt=1e-3, opt_iter=12, max_rank=32, max_bd=32
+    )
     left = float(ux.norm) / n0
     assert left < 0.05, f"projection left {100 * left:.1f}% of a pure gradient"
     return f"pure gradient projects away ({100 * left:.3f}% left)"
@@ -594,14 +710,16 @@ def test_mask_before_projection(Q=6):
     scale = float(ux.norm) / dx
 
     after = float(ops.divergence(ux * mask, uy * mask).norm) / scale
-    bx, by, _, _ = project_divergence_free(ux * mask, uy * mask, ops, dt=1e-3, opt_iter=8,
-                           max_rank=32, max_bd=32)
+    bx, by, _, _ = project_divergence_free(
+        ux * mask, uy * mask, ops, dt=1e-3, opt_iter=8, max_rank=32, max_bd=32
+    )
     before = float(ops.divergence(bx, by).norm) / scale
     assert before < after / 10, (
-        f"mask-then-project ({before:.2e}) is not better than "
-        f"project-then-mask ({after:.2e})")
-    return (f"mask before projection: {before:.2e} vs {after:.2e} after "
-            f"({after / before:.0f}x worse)")
+        f"mask-then-project ({before:.2e}) is not better than project-then-mask ({after:.2e})"
+    )
+    return (
+        f"mask before projection: {before:.2e} vs {after:.2e} after ({after / before:.0f}x worse)"
+    )
 
 
 def test_boundary_rows_are_clean(Q=6, nrows=4):
@@ -616,33 +734,24 @@ def test_boundary_rows_are_clean(Q=6, nrows=4):
     """
     (X, _), dx = _unit_square_grid(Q)
     n = 2**Q
-    ops = Operators(Q, dx, bcv=BCV_CHANNEL, bcp=BCP_CHANNEL,
-                    inflow_rows=nrows)
+    ops = Operators(Q, dx, bcv=BCV_CHANNEL, bcp=BCP_CHANNEL, inflow_rows=nrows)
     one = grid_to_mps(np.ones_like(X), Q)
     edge = list(range(nrows)) + list(range(n - nrows, n))
     for lab, op in (("Dx", ops.Dx), ("Gx", ops.Gx)):
         raw = mps_to_grid(op.apply(one), Q)[:, n // 2]
         interior = np.delete(raw, edge)
         assert np.abs(interior).max() < 1e-9, (
-            f"{lab} does not annihilate a constant in the interior: "
-            f"{np.abs(interior).max():.2e}")
+            f"{lab} does not annihilate a constant in the interior: {np.abs(interior).max():.2e}"
+        )
         assert np.abs(raw[edge]).max() > 1.0, (
             f"{lab}'s boundary rows look clean ({np.abs(raw[edge]).max():.2e}); "
-            f"if that is now true the hold may be unnecessary")
+            f"if that is now true the hold may be unnecessary"
+        )
         clean = np.abs(mps_to_grid(ops.held(op.apply(one)), Q)).max()
         assert clean < 1e-9, f"held({lab}(const)) = {clean:.2e}, not zero"
-    return (f"boundary rows isolated: {nrows} at each end, interior clean to "
-            f"1e-9, held() zeroes them")
-
-
-def _column_mean(m, ix, Q):
-    """Mean of an MPS field down one column of constant x."""
-    n = 2**Q
-    flat = np.zeros(n, dtype=np.int64)
-    for k in range(Q):
-        flat = (flat << 1) | ((ix >> (Q - 1 - k)) & 1)
-        flat = (flat << 1) | ((np.arange(n) >> (Q - 1 - k)) & 1)
-    return float(np.asarray(m.query(flat.tolist())).mean())
+    return (
+        f"boundary rows isolated: {nrows} at each end, interior clean to 1e-9, held() zeroes them"
+    )
 
 
 def test_inflow_is_held(Q=6, steps=3):
@@ -665,16 +774,83 @@ def test_inflow_is_held(Q=6, steps=3):
     n0, inlet0 = float(ux.norm), _column_mean(ux, 0, Q)
     guess = None
     for _ in range(steps):
-        ux, uy, _, guess = projection_step(ux, uy, ops, dx * 0.2 / U, 1e-3, mask,
-                                eps=1e-11, max_bd=32, opt_iter=8, guess=guess)
+        ux, uy, _, guess = projection_step(
+            ux, uy, ops, dx * 0.2 / U, 1e-3, mask, eps=1e-11, max_bd=32, opt_iter=8, guess=guess
+        )
     inlet, far = _column_mean(ux, 0, Q), _column_mean(ux, 2**Q - 8, Q)
     kept = float(ux.norm) / n0
     assert kept > 0.5, f"the flow drained: |u| kept only {100 * kept:.1f}%"
-    assert abs(inlet - inlet0) < 0.05 * U, (
-        f"inlet drifted from {inlet0:.4f} to {inlet:.4f}")
+    assert abs(inlet - inlet0) < 0.05 * U, f"inlet drifted from {inlet0:.4f} to {inlet:.4f}"
     assert far > 0.3 * U, f"far field collapsed to {far:.4f}"
-    return (f"inflow held over {steps} steps (inlet {inlet:.4f}, far field "
-            f"{far:.4f}, |u| kept {100 * kept:.0f}%)")
+    return (
+        f"inflow held over {steps} steps (inlet {inlet:.4f}, far field "
+        f"{far:.4f}, |u| kept {100 * kept:.0f}%)"
+    )
+
+
+def test_held_projection_keeps_inflow(Q=6, steps=3):
+    """The held projection must leave the inflow rows alone; the default does not.
+
+    The field is the ENEC situation in miniature: flow past a disc whose
+    outlet band carries 4 % less flux than the inlet, as the Star-CCM+ warm
+    start does in this domain (0.96 U).  Projecting it with the default
+    operators moves the inflow; with held=True the inlet rows must come back
+    exactly, the interior divergence must still be removed, and a few steps
+    later the inflow must still be U.
+    """
+    (X, Y), dx = _unit_square_grid(Q)
+    n = 2**Q
+    r = np.sqrt((X - 0.35) ** 2 + (Y - 0.5) ** 2)
+    mask_g = 1.0 / (1.0 + np.exp(-(r - 0.12) / (0.5 * dx)))  # 1 at the ends
+    ramp = np.clip((np.arange(n) - (n - 12)) / 8.0, 0, 1)[:, None]
+    mask, U = grid_to_mps(mask_g, Q), 1.0
+    inlet = {}
+    for held in (False, True):
+        ops = Operators(Q, dx, bcv=BCV_CHANNEL, bcp=BCP_CHANNEL, held=held)
+        ux = grid_to_mps(mask_g * U * (1 - 0.04 * ramp), Q)
+        uy = grid_to_mps(np.zeros_like(X), Q)
+        b0 = float(ops.held(ops.divergence(ux, uy)).norm)
+        ux, uy, _, _ = project_divergence_free(
+            ux, uy, ops, 0.2 * dx / U, eps=1e-12, max_bd=64, opt_iter=20
+        )
+        g = mps_to_grid(ux, Q)
+        inlet[held] = np.abs(g[:4] - U).max()
+        div = float(ops.held(ops.divergence(ux, uy)).norm) / b0
+        assert div < 1e-6, f"held={held}: projection left {div:.1e} of the divergence"
+    assert inlet[False] > 1e-3, (
+        f"default projection no longer moves the inflow ({inlet[False]:.1e})"
+    )
+    assert inlet[True] < 1e-9, f"held projection moved the inflow by {inlet[True]:.1e}"
+    # now under truncation (chi=12, also as the global cap, as bundle_simulation sets
+    # it): the pin must keep the inflow exact anyway
+    ops = Operators(Q, dx, bcv=BCV_CHANNEL, bcp=BCP_CHANNEL, held=True, inflow=U)
+    guess, pr = None, grid_to_mps(np.zeros_like(X), Q)
+    with compression_limits(1e-12, 12):
+        for _ in range(steps):
+            ux, uy, pr, guess = projection_step(
+                ux,
+                uy,
+                ops,
+                0.2 * dx / U,
+                1e-3,
+                mask,
+                eps=1e-12,
+                max_bd=12,
+                opt_iter=12,
+                guess=guess,
+                pressure=pr,
+            )
+    g = mps_to_grid(ux, Q)[:4]
+    moved, rms = abs(g.mean() - U), np.sqrt(((g - U) ** 2).mean())
+    # one truncation's worth, not accumulated (unpinned: rms 4.5e-2 by step 100 at chi=16)
+    assert moved < 1e-3 and rms < 1e-2, (
+        f"pinned inflow off by {moved:.1e} (mean), {rms:.1e} (rms) after {steps} steps at chi=12"
+    )
+    return (
+        f"inflow moved {inlet[False]:.1e} by the default projection, "
+        f"{inlet[True]:.0e} held; after {steps} pinned steps at chi=12 "
+        f"mean {moved:.0e}, rms {rms:.0e}"
+    )
 
 
 def test_steady_state_is_a_fixed_point(Q=6, steps=5):
@@ -699,14 +875,16 @@ def test_steady_state_is_a_fixed_point(Q=6, steps=5):
     u0 = float(ux.norm)
     a_, b_, pp, g = ux, uy, p, None
     for _ in range(steps):
-        a_, b_, pp, g = projection_step(a_, b_, ops, 0.2 * dx / U, 5e-3, eps=1e-11,
-                             max_bd=32, opt_iter=10, guess=g, pressure=pp)
+        a_, b_, pp, g = projection_step(
+            a_, b_, ops, 0.2 * dx / U, 5e-3, eps=1e-11, max_bd=32, opt_iter=10, guess=g, pressure=pp
+        )
     drift = float((a_ + ux * (-1.0)).norm) / u0
     cross = float(b_.norm) / u0
     assert drift < 1e-3, f"uniform stream drifted {100 * drift:.3f}%"
     assert cross < 1e-3, f"cross-stream velocity appeared: {cross:.2e}"
-    return (f"uniform steady state held for {steps} steps "
-            f"(drift {drift:.1e}, cross flow {cross:.1e})")
+    return (
+        f"uniform steady state held for {steps} steps (drift {drift:.1e}, cross flow {cross:.1e})"
+    )
 
 
 def test_taylor_green(Q=6, steps=12):
@@ -733,8 +911,9 @@ def test_taylor_green(Q=6, steps=12):
     n0 = float(ux.norm)
     guess = None
     for _ in range(steps):
-        ux, uy, pr, guess = projection_step(ux, uy, ops, dt, nu, eps=1e-10, max_bd=16,
-                                 opt_iter=6, guess=guess, pressure=pr)
+        ux, uy, pr, guess = projection_step(
+            ux, uy, ops, dt, nu, eps=1e-10, max_bd=16, opt_iter=6, guess=guess, pressure=pr
+        )
     t = steps * dt
     want = np.exp(-8 * np.pi**2 * nu * t)
     got = float(ux.norm) / n0
@@ -744,83 +923,25 @@ def test_taylor_green(Q=6, steps=12):
     # failed to decay at all would come in at ~4.8%, so this discriminates.
     assert rel < 0.02, f"Taylor-Green decayed by {got:.5f}, exact {want:.5f}"
     assert div < 1e-3, f"Taylor-Green lost divergence-freedom ({div:.2e})"
-    return (f"Taylor-Green decay {got:.5f} vs exact {want:.5f} "
-            f"({100 * rel:.2f}% off, |div| {div:.1e})")
+    return (
+        f"Taylor-Green decay {got:.5f} vs exact {want:.5f} ({100 * rel:.2f}% off, |div| {div:.1e})"
+    )
 
 
-def test_held_projection_keeps_inflow(Q=6, steps=3):
-    """The held projection must leave the inflow rows alone; the default does not.
-
-    The field is the ENEC situation in miniature: flow past a disc whose
-    outlet band carries 4 % less flux than the inlet, as the Star-CCM+ warm
-    start does in this domain (0.96 U).  Projecting it with the default
-    operators moves the inflow; with held=True the inlet rows must come back
-    exactly, the interior divergence must still be removed, and a few steps
-    later the inflow must still be U.
-    """
-    (X, Y), dx = _unit_square_grid(Q)
+def _unit_square_grid(Q):
     n = 2**Q
-    r = np.sqrt((X - 0.35) ** 2 + (Y - 0.5) ** 2)
-    mask_g = 1.0 / (1.0 + np.exp(-(r - 0.12) / (0.5 * dx)))  # 1 at the ends
-    ramp = np.clip((np.arange(n) - (n - 12)) / 8.0, 0, 1)[:, None]
-    mask, U = grid_to_mps(mask_g, Q), 1.0
-    inlet = {}
-    for held in (False, True):
-        ops = Operators(Q, dx, bcv=BCV_CHANNEL, bcp=BCP_CHANNEL, held=held)
-        ux = grid_to_mps(mask_g * U * (1 - 0.04 * ramp), Q)
-        uy = grid_to_mps(np.zeros_like(X), Q)
-        b0 = float(ops.held(ops.divergence(ux, uy)).norm)
-        ux, uy, _, _ = project_divergence_free(ux, uy, ops, 0.2 * dx / U, eps=1e-12,
-                               max_bd=64, opt_iter=20)
-        g = mps_to_grid(ux, Q)
-        inlet[held] = np.abs(g[:4] - U).max()
-        div = float(ops.held(ops.divergence(ux, uy)).norm) / b0
-        assert div < 1e-6, f"held={held}: projection left {div:.1e} of the divergence"
-    assert inlet[False] > 1e-3, f"default projection no longer moves the inflow ({inlet[False]:.1e})"
-    assert inlet[True] < 1e-9, f"held projection moved the inflow by {inlet[True]:.1e}"
-    # now under truncation (chi=12, also as the global cap, as bundle_simulation sets
-    # it): the pin must keep the inflow exact anyway
-    ops = Operators(Q, dx, bcv=BCV_CHANNEL, bcp=BCP_CHANNEL, held=True, inflow=U)
-    guess, pr = None, grid_to_mps(np.zeros_like(X), Q)
-    with compression_limits(1e-12, 12):
-        for _ in range(steps):
-            ux, uy, pr, guess = projection_step(ux, uy, ops, 0.2 * dx / U, 1e-3, mask, eps=1e-12,
-                                     max_bd=12, opt_iter=12, guess=guess, pressure=pr)
-    g = mps_to_grid(ux, Q)[:4]
-    moved, rms = abs(g.mean() - U), np.sqrt(((g - U) ** 2).mean())
-    # one truncation's worth, not accumulated (unpinned: rms 4.5e-2 by step 100 at chi=16)
-    assert moved < 1e-3 and rms < 1e-2, (
-        f"pinned inflow off by {moved:.1e} (mean), {rms:.1e} (rms) after {steps} steps at chi=12")
-    return (f"inflow moved {inlet[False]:.1e} by the default projection, "
-            f"{inlet[True]:.0e} held; after {steps} pinned steps at chi=12 mean {moved:.0e}, rms {rms:.0e}")
+    g = np.linspace(0.0, 1.0, n)
+    return np.meshgrid(g, g, indexing="ij"), 1.0 / (n - 1)
 
 
-def selfcheck():
-    tests = [
-        test_projection_identity,
-        test_projection_removes_divergence,
-        test_divergence_free_is_preserved,
-        test_mask_before_projection,
-        test_boundary_rows_are_clean,
-        test_inflow_is_held,
-        test_held_projection_keeps_inflow,
-        test_steady_state_is_a_fixed_point,
-        test_taylor_green,
-    ]
-    import time
-
-    bad = 0
-    for fn in tests:
-        t0 = time.time()
-        try:
-            msg = fn()
-            print(f"  PASS  [{time.time() - t0:5.1f}s] {msg}", flush=True)
-        except AssertionError as exc:
-            print(f"  FAIL  [{time.time() - t0:5.1f}s] {fn.__name__}: {exc}",
-                  flush=True)
-            bad += 1
-    print("chorin_projection: OK" if not bad else f"chorin_projection: {bad} FAILED")
-    return bad
+def _column_mean(m, ix, Q):
+    """Mean of an MPS field down one column of constant x."""
+    n = 2**Q
+    flat = np.zeros(n, dtype=np.int64)
+    for k in range(Q):
+        flat = (flat << 1) | ((ix >> (Q - 1 - k)) & 1)
+        flat = (flat << 1) | ((np.arange(n) >> (Q - 1 - k)) & 1)
+    return float(np.asarray(m.query(flat.tolist())).mean())
 
 
 if __name__ == "__main__":

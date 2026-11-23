@@ -1,4 +1,5 @@
 """Reader for the Star-CCM+ VTK snapshots (ASCII unstructured grid, VTK 5.1); numpy only."""
+
 import tarfile
 
 import numpy as np
@@ -18,11 +19,14 @@ def read_star_vtk(path, member=None):
         with open(path, "rb") as f:
             raw = f.read()
     tok = raw.split()
-    at = {k: i for i, k in reversed(list(enumerate(tok))) if k in
-          (b"POINTS", b"OFFSETS", b"CONNECTIVITY", b"CELL_TYPES", b"CELL_DATA")}
+    at = {
+        k: i
+        for i, k in reversed(list(enumerate(tok)))
+        if k in (b"POINTS", b"OFFSETS", b"CONNECTIVITY", b"CELL_TYPES", b"CELL_DATA")
+    }
 
     def nums(i, n, dtype=float):  # n numbers from token i
-        return np.array(tok[i:i + n], dtype=dtype)
+        return np.array(tok[i : i + n], dtype=dtype)
 
     i = at[b"POINTS"]
     pts = nums(i + 3, 3 * int(tok[i + 1])).reshape(-1, 3)[:, :2]

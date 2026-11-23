@@ -105,6 +105,7 @@ to keep run outputs, `-v "$PWD/fig:/work/report/fig"` to keep the figures).
 
 ```bash
 make notebook         # JupyterLab on tutorial/ (port 8888)
+make presentation     # copy of the notebook without the explanatory text, for a talk
 make report           # report/fig/*.pdf and the numbers/tables (*.tex) from data/archive
 make check            # difference-operator test, solver suite, probe-vs-dense forces, dense twin
 make smoke            # 256² bundle: warm start, 3 RK4 steps, per-rod forces (a few minutes)
@@ -172,6 +173,12 @@ solver modules from `../scripts` and reads
 `../data/archive/q11_q11_t2500_bd60_rk4.npz`, so it must be started from
 `tutorial/` (both commands do). It ships with its outputs, so you can read it
 before running it.
+
+**Presenting it.** The explanatory prose sits in separate markdown cells tagged `reading`;
+headings, figures, equations, tables and code are untagged. `make presentation` writes
+`tutorial/mps_cfd_building_blocks_presentation.ipynb` without the `reading` cells, so the
+audience sees the figures, equations and live code while the full text stays in the original
+for anyone running it alone.
 
 ## Finite-difference operators: the two builders
 

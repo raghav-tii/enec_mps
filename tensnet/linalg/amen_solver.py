@@ -87,10 +87,6 @@ def compute_env_tensors_amen(A, b, x):
     return lhs_env_tensors, rhs_env_tensors
 
 
-
-
-
-
 def _orthogonalize_enrichment_forward(temp_core, enrichment, pd):
     """Project enrichment columns orthogonal to temp_core's column space (QR-based)."""
     X = rearrange(temp_core, "l d r -> (l d) r")
@@ -195,7 +191,8 @@ def forward_sweep_amen(
 
     # Incremental residual-overlap environment
     res_left_env = einsum(
-        updated_core.conj(), res_tensors[ix],
+        updated_core.conj(),
+        res_tensors[ix],
         "l i r, l1 i r1 -> r r1",
     )
 
@@ -233,7 +230,8 @@ def forward_sweep_amen(
         temp_core = loc_sol.reshape(lbd, pd, -1)
 
         enrichment = einsum(
-            res_left_env, res_tensors[ix],
+            res_left_env,
+            res_tensors[ix],
             "l r1, r1 i r -> l i r",
         )[:, :, :residual_rank]
 
@@ -254,13 +252,13 @@ def forward_sweep_amen(
         new_tensors.append(updated_core)
 
         res_left_env = einsum(
-            res_left_env, updated_core.conj(), res_tensors[ix],
+            res_left_env,
+            updated_core.conj(),
+            res_tensors[ix],
             "l1 l2, l1 i r1, l2 i r2 -> r1 r2",
         )
 
-        lhs_env_tensor_n = _absorb_operator_lenv(
-            A[ix].tensor, updated_core, lhs_env_tensor_n
-        )
+        lhs_env_tensor_n = _absorb_operator_lenv(A[ix].tensor, updated_core, lhs_env_tensor_n)
         rhs_env_tensor_n = _absorb_rhs_lenv(b[ix].tensor, updated_core, rhs_env_tensor_n)
 
         lhs_env_tensors_n.insert(0, lhs_env_tensor_n)
@@ -381,7 +379,8 @@ def reverse_sweep_amen(
 
     # Incremental residual-overlap environment
     res_right_env = einsum(
-        updated_core.conj(), res_tensors[-1],
+        updated_core.conj(),
+        res_tensors[-1],
         "l i r, l1 i r1 -> l l1",
     )
 
@@ -419,7 +418,8 @@ def reverse_sweep_amen(
         temp_core = loc_sol.reshape(-1, pd, rbd)
 
         enrichment = einsum(
-            res_tensors[ix], res_right_env,
+            res_tensors[ix],
+            res_right_env,
             "l i r1, r2 r1 -> l i r2",
         )[:residual_rank, :, :]
 
@@ -440,13 +440,13 @@ def reverse_sweep_amen(
         new_tensors.insert(0, updated_core)
 
         res_right_env = einsum(
-            res_right_env, updated_core.conj(), res_tensors[ix],
+            res_right_env,
+            updated_core.conj(),
+            res_tensors[ix],
             "r1 r2, l1 i r1, l2 i r2 -> l1 l2",
         )
 
-        lhs_env_tensor_n = _absorb_operator_renv(
-            A[ix].tensor, updated_core, lhs_env_tensor_n
-        )
+        lhs_env_tensor_n = _absorb_operator_renv(A[ix].tensor, updated_core, lhs_env_tensor_n)
         rhs_env_tensor_n = _absorb_rhs_renv(b[ix].tensor, updated_core, rhs_env_tensor_n)
 
         lhs_env_tensors_n.insert(0, lhs_env_tensor_n)
@@ -648,7 +648,7 @@ def linsys_amen(
         if eps is not None and torch.exp(history[-1]) <= eps:
             break
 
-    print("Residuals:", torch.exp(torch.tensor(history)),flush=True)
+    print("Residuals:", torch.exp(torch.tensor(history)), flush=True)
 
     if save_best:
         solution = (solution, best_solution)

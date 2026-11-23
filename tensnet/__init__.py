@@ -1,5 +1,6 @@
 """tensnet: matrix product state (MPS) and operator (MPO) data structures, finite-difference
 operators and AMEn / DMRG linear solvers, as used by the 21-rod bundle solver in scripts/."""
+
 __version__ = "0.1.4"
 import sys
 

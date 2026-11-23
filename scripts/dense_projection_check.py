@@ -69,9 +69,9 @@ class DenseOps:
             return np.linalg.lstsq(self.lap, b, rcond=None)[0]
 
 
-def dense_step(ux, uy, ops, dt, nu, mask=None, pressure=None, rotational=True,
-               rk4=False):
+def dense_step(ux, uy, ops, dt, nu, mask=None, pressure=None, rotational=True, rk4=False):
     """One step, algebraically identical to chorin_projection.projection_step (and its `rk4`)."""
+
     def rhs(u, v):
         ix = -(u * (ops.Dx @ u) + v * (ops.Dy @ u)) + nu * ops.laplacian(u)
         iy = -(u * (ops.Dx @ v) + v * (ops.Dy @ v)) + nu * ops.laplacian(v)
@@ -99,7 +99,8 @@ def dense_step(ux, uy, ops, dt, nu, mask=None, pressure=None, rotational=True,
 
 
 def dense_project(us, vs, ops, dt, nu, pressure=None, rotational=True):
-    """The projection half of dense_step, algebraically identical to chorin_projection.project_divergence_free."""
+    """The projection half of dense_step: algebraically identical to
+    chorin_projection.project_divergence_free."""
     b = ops.held(ops.divergence(us, vs))
     phi = ops.solve(b)
     # Correction NOT held, matching chorin_projection: holding the right-hand side
@@ -123,8 +124,7 @@ def flat(m, Q):
 
 
 def to_mps(v, Q, eps=1e-13):
-    return tt.vector_to_mps(torch.from_numpy(np.ascontiguousarray(v)), 2,
-                            2 * Q, eps)
+    return tt.vector_to_mps(torch.from_numpy(np.ascontiguousarray(v)), 2, 2 * Q, eps)
 
 
 def compare(Q=5, steps=6, max_bd=None, opt_iter=20, nu=5e-3, seed=0, rk4=False, held=False):
@@ -149,40 +149,64 @@ def compare(Q=5, steps=6, max_bd=None, opt_iter=20, nu=5e-3, seed=0, rk4=False, 
 
     dt = 0.2 * dx / U
     bd = max_bd or 4 * n  # effectively uncapped unless asked
-    print(f"Q={Q}  grid {n}^2  dt={dt:.3e}  nu={nu}  "
-          f"max_bd={'uncapped' if max_bd is None else max_bd}  "
-          f"opt_iter={opt_iter}")
-    print(f"{'step':>5}{'|u| dense':>12}{'|u| mps':>12}{'u rel diff':>12}"
-          f"{'p rel diff':>12}{'|div| dense':>13}{'|div| mps':>12}")
+    print(
+        f"Q={Q}  grid {n}^2  dt={dt:.3e}  nu={nu}  "
+        f"max_bd={'uncapped' if max_bd is None else max_bd}  "
+        f"opt_iter={opt_iter}"
+    )
+    print(
+        f"{'step':>5}{'|u| dense':>12}{'|u| mps':>12}{'u rel diff':>12}"
+        f"{'p rel diff':>12}{'|div| dense':>13}{'|div| mps':>12}"
+    )
     guess = None
     for k in range(steps):
         ux_d, uy_d, p_d = dense_step(ux_d, uy_d, dops, dt, nu, mask_v, p_d, rk4=rk4)
-        ux_m, uy_m, p_m, guess = C.projection_step(ux_m, uy_m, ops, dt, nu, mask,
-                                        eps=1e-12, max_bd=bd,
-                                        opt_iter=opt_iter, guess=guess,
-                                        pressure=p_m, rk4=rk4)
+        ux_m, uy_m, p_m, guess = C.projection_step(
+            ux_m,
+            uy_m,
+            ops,
+            dt,
+            nu,
+            mask,
+            eps=1e-12,
+            max_bd=bd,
+            opt_iter=opt_iter,
+            guess=guess,
+            pressure=p_m,
+            rk4=rk4,
+        )
         um, pm = flat(ux_m, Q), flat(p_m, Q)
         du = np.abs(um - ux_d).max() / max(np.abs(ux_d).max(), 1e-30)
         dp = np.abs(pm - p_d).max() / max(np.abs(p_d).max(), 1e-30)
         dd = np.abs(dops.held(dops.divergence(ux_d, uy_d))).max() * dx
         dm = float(ops.held(ops.divergence(ux_m, uy_m)).norm) * dx / float(ux_m.norm)
-        print(f"{k:>5}{np.linalg.norm(ux_d):>12.4e}{float(ux_m.norm):>12.4e}"
-              f"{du:>12.2e}{dp:>12.2e}{dd:>13.2e}{dm:>12.2e}", flush=True)
+        print(
+            f"{k:>5}{np.linalg.norm(ux_d):>12.4e}{float(ux_m.norm):>12.4e}"
+            f"{du:>12.2e}{dp:>12.2e}{dd:>13.2e}{dm:>12.2e}",
+            flush=True,
+        )
     return ux_d, ux_m
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--Q", type=int, default=5)
     ap.add_argument("--steps", type=int, default=6)
-    ap.add_argument("--max-bd", type=int, default=None,
-                    help="cap the MPS solver; default uncapped, so a "
-                         "disagreement is the DMRG solve rather than truncation")
+    ap.add_argument(
+        "--max-bd",
+        type=int,
+        default=None,
+        help="cap the MPS solver; default uncapped, so a "
+        "disagreement is the DMRG solve rather than truncation",
+    )
     ap.add_argument("--opt-iter", type=int, default=20)
     ap.add_argument("--nu", type=float, default=5e-3)
     ap.add_argument("--rk4", action="store_true", help="RK4 predictor in both solvers")
-    ap.add_argument("--held", action="store_true", help="chorin_projection's held projection in both solvers")
+    ap.add_argument(
+        "--held", action="store_true", help="chorin_projection's held projection in both solvers"
+    )
     a = ap.parse_args()
     compare(a.Q, a.steps, a.max_bd, a.opt_iter, a.nu, rk4=a.rk4, held=a.held)
 

@@ -11,7 +11,6 @@ explicit_grid_operators.py; the README compares the two.
 The helpers `row_mpo`, `column_mpo`, `zeros_padding` and `get_2D_operator` build selection MPOs and
 embed a 1D operator into a 2D grid; `_toeplitz` builds the banded 1D operator.
 """
-from typing import Union
 
 import torch
 from scipy.linalg import toeplitz
@@ -23,7 +22,6 @@ from ..networks import (
     identity_mpo,
     identity_mpo_node,
     list_to_mpo,
-    matrix_to_mpo,
     mps_mpo_col_mul,
     mps_to_mpo,
     vector_to_mps,
@@ -217,7 +215,9 @@ def get_2D_operator(
 
     if arch == "stacked":
         if Q is None:
-            Q = identity_mpo(nofq[int(not axis)], dtype=P[0].tensor.dtype, device=P[0].tensor.device)
+            Q = identity_mpo(
+                nofq[int(not axis)], dtype=P[0].tensor.dtype, device=P[0].tensor.device
+            )
         if axis == 0:
             return MPO(P.nodes + Q.nodes)
         if axis == 1:
@@ -233,18 +233,16 @@ def get_2D_operator(
                 if Q is None:
                     nodes.append(
                         identity_mpo_node(
-                            node.shape[2], node.shape[1],
-                            dtype=node.tensor.dtype, device=node.tensor.device,
+                            node.shape[2],
+                            node.shape[1],
+                            dtype=node.tensor.dtype,
+                            device=node.tensor.device,
                         )
                     )
                 else:
                     Qtensor = Q[j].tensor
                     nodes.append(
-                        MPO_Node(
-                            Qtensor.expand(
-                                node.shape[2], Qtensor.shape[1], node.shape[2]
-                            )
-                        )
+                        MPO_Node(Qtensor.expand(node.shape[2], Qtensor.shape[1], node.shape[2]))
                     )
 
             return MPO(nodes)
@@ -255,18 +253,16 @@ def get_2D_operator(
                 if Q is None:
                     nodes.append(
                         identity_mpo_node(
-                            node.shape[0], node.shape[1],
-                            dtype=node.tensor.dtype, device=node.tensor.device,
+                            node.shape[0],
+                            node.shape[1],
+                            dtype=node.tensor.dtype,
+                            device=node.tensor.device,
                         )
                     )
                 else:
                     Qtensor = Q[j].tensor
                     nodes.append(
-                        MPO_Node(
-                            Qtensor.expand(
-                                node.shape[0], Qtensor.shape[1], node.shape[0]
-                            )
-                        )
+                        MPO_Node(Qtensor.expand(node.shape[0], Qtensor.shape[1], node.shape[0]))
                     )
                 nodes.append(node)
 
@@ -305,12 +301,12 @@ def get_boundary_correction(order: int, nofq, bc, device=None) -> MPO:
     if bc[0] == "neumann":
         cfs2 = torch.tensor([a[i] for i in range(-4, 0)], device=device)
         m1 = torch.triu(torch.tensor(toeplitz(cfs2.to("cpu")), device=device))
-        m2 = torch.flip(
-            torch.stack([torch.roll(newcl, j) for j in range(4)]), dims=(0,)
-        )
+        m2 = torch.flip(torch.stack([torch.roll(newcl, j) for j in range(4)]), dims=(0,))
         ml = m1 @ m2
         left_coef = -torch.squeeze(ml[0, :])
-        left_corr = mps_mpo_col_mul(vector_to_mps(left_coef, d=2, N=3), row_mpo(3, 0, device=device))
+        left_corr = mps_mpo_col_mul(
+            vector_to_mps(left_coef, d=2, N=3), row_mpo(3, 0, device=device)
+        )
         if corr_mpo is None:
             corr_mpo = zeros_padding(left_corr, nofq, "ul")
         else:
@@ -346,7 +342,7 @@ def get_diff_mpo(
     dim: int,
     order: int,
     axis: int = None,
-    nofq: Union[int, list[int]] = None,
+    nofq: int | list[int] = None,
     bc="periodic",
     arch=None,
     device=None,
@@ -406,9 +402,7 @@ def get_diff_mpo(
             nofq = [parameters("Lx"), parameters("Ly")]
 
     if dim not in [1, 2]:
-        raise ValueError(
-            "Currently supported derivatives are only for 1d and 2d functions"
-        )
+        raise ValueError("Currently supported derivatives are only for 1d and 2d functions")
     a = get_cendif_coef(order)
 
     if parameters("low_acc"):

@@ -12,8 +12,8 @@ spacing, and every builder recompresses to the exact rank (rtol 1e-13).
 """
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -45,7 +45,7 @@ class Dirichlet:
     """u = value at the wall. `value` is a float, or on a multi-D grid an MPS
     over the other axes (in the arch's site order) giving the wall data."""
 
-    value: Union[float, MPS] = 0.0
+    value: float | MPS = 0.0
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ class Neumann:
     """du/dx = value at the wall, x being the axis coordinate (not the outward
     normal). `value` is a float or, on a multi-D grid, an MPS over the other axes."""
 
-    value: Union[float, MPS] = 0.0
+    value: float | MPS = 0.0
 
 
 # ---------------------------------------------------------------- grids
@@ -79,7 +79,9 @@ def grid_spacing(nofq: int, bounds=(0.0, 1.0), grid: str = "vertex") -> float:
     return (bounds[1] - bounds[0]) / (n - 1 if grid == "vertex" else n)
 
 
-def grid_points(nofq: int, bounds=(0.0, 1.0), grid: str = "vertex", dtype=torch.float64, device=None) -> torch.Tensor:
+def grid_points(
+    nofq: int, bounds=(0.0, 1.0), grid: str = "vertex", dtype=torch.float64, device=None
+) -> torch.Tensor:
     """Coordinates x_j of an axis, in the order the MPS encodes them.
 
     Parameters
@@ -93,7 +95,9 @@ def grid_points(nofq: int, bounds=(0.0, 1.0), grid: str = "vertex", dtype=torch.
         Shape (2**nofq,).
     """
     h = grid_spacing(nofq, bounds, grid)
-    j = torch.arange(2**nofq, dtype=dtype, device=device if device is not None else default_device())
+    j = torch.arange(
+        2**nofq, dtype=dtype, device=device if device is not None else default_device()
+    )
     return bounds[0] + (j + (0.5 if grid == "cell" else 0.0)) * h
 
 
@@ -102,14 +106,14 @@ def grid_points(nofq: int, bounds=(0.0, 1.0), grid: str = "vertex", dtype=torch.
 
 def diff_mpo(
     order: int,
-    nofq: Union[int, Sequence[int]],
+    nofq: int | Sequence[int],
     axis: int = 0,
     *,
     bounds=(0.0, 1.0),
-    grid: Union[str, Sequence[str]] = "vertex",
+    grid: str | Sequence[str] = "vertex",
     accuracy: int = 8,
     bc=None,
-    arch: Optional[str] = None,
+    arch: str | None = None,
     weighted: bool = False,
     dtype=torch.float64,
     device=None,
@@ -171,22 +175,35 @@ def diff_mpo(
     h = grid_spacing(nofq[axis], bounds[axis], grid[axis])
     P = _operator_1d(order, nofq[axis], grid[axis], accuracy, left, right, weighted, dtype, device)
     P = _compress(P * h ** (int(weighted) - order))
-    if len(nofq) > 1:  # H A = (H_a A_a) x diag(H_b) on the other axes b; exact-rank factors, so this only regauges
-        P = _compress(_embed(P, axis, nofq, arch, {b: _weights(nofq, bounds, grid, accuracy, [b], arch, weighted, dtype, device)
-                                        for b in range(len(nofq)) if b != axis}))
+    if (
+        len(nofq) > 1
+    ):  # H A = (H_a A_a) x diag(H_b) on the other axes b; exact-rank factors, so this only regauges
+        P = _compress(
+            _embed(
+                P,
+                axis,
+                nofq,
+                arch,
+                {
+                    b: _weights(nofq, bounds, grid, accuracy, [b], arch, weighted, dtype, device)
+                    for b in range(len(nofq))
+                    if b != axis
+                },
+            )
+        )
     return P
 
 
 def bc_mps(
     order: int,
-    nofq: Union[int, Sequence[int]],
+    nofq: int | Sequence[int],
     axis: int = 0,
     *,
     bounds=(0.0, 1.0),
-    grid: Union[str, Sequence[str]] = "vertex",
+    grid: str | Sequence[str] = "vertex",
     accuracy: int = 8,
     bc=None,
-    arch: Optional[str] = None,
+    arch: str | None = None,
     weighted: bool = False,
     dtype=torch.float64,
     device=None,
@@ -238,12 +255,12 @@ def bc_mps(
 
 
 def quadrature_mps(
-    nofq: Union[int, Sequence[int]],
+    nofq: int | Sequence[int],
     *,
     bounds=(0.0, 1.0),
-    grid: Union[str, Sequence[str]] = "vertex",
+    grid: str | Sequence[str] = "vertex",
     accuracy: int = 8,
-    arch: Optional[str] = None,
+    arch: str | None = None,
     dtype=torch.float64,
     device=None,
 ) -> MPS:
@@ -265,18 +282,22 @@ def quadrature_mps(
     parts = []
     for a in range(len(nofq)):
         h = grid_spacing(nofq[a], bounds[a], grid[a])
-        w = _scale(_ones(nofq[a:a + 1], [0], arch, dtype, device), h)
+        w = _scale(_ones(nofq[a : a + 1], [0], arch, dtype, device), h)
         if grid[a] != "periodic":
             hb = np.asarray(_table(grid[a], accuracy)["h"]) - 1.0
-            v = np.zeros(_block(grid[a], accuracy)); v[: len(hb)] = hb * h
+            v = np.zeros(_block(grid[a], accuracy))
+            v[: len(hb)] = hb * h
             for side in (0, 1):
-                w = _mps_add(w, _corner_mps(v if side == 0 else v[::-1].copy(), nofq[a], side, dtype, device))
+                w = _mps_add(
+                    w, _corner_mps(v if side == 0 else v[::-1].copy(), nofq[a], side, dtype, device)
+                )
         parts.append(((a,), w))
     return _compress(parts[0][1] if len(parts) == 1 else _merge(parts, nofq, arch))
 
 
-def spectral_radius_bound(order: int, nofq: int, *, bounds=(0.0, 1.0), grid: str = "vertex",
-                          accuracy: int = 8, bc=None) -> float:
+def spectral_radius_bound(
+    order: int, nofq: int, *, bounds=(0.0, 1.0), grid: str = "vertex", accuracy: int = 8, bc=None
+) -> float:
     """Gershgorin bound (largest absolute row sum) on the spectral radius of the 1D d^order/dx^order.
 
     Read off the stencil and the wall-closure block, so no matrix is formed and
@@ -294,7 +315,7 @@ def spectral_radius_bound(order: int, nofq: int, *, bounds=(0.0, 1.0), grid: str
     rows = [sum(abs(v) for v in a.values())]
     if grid != "periodic":
         W = _block(grid, accuracy)
-        for side, kind in enumerate(_bc_pair(bc, grid, order)):
+        for _side, kind in enumerate(_bc_pair(bc, grid, order)):
             C = np.abs(_left_operator(order, grid, accuracy, kind))
             for i in range(W):  # band entries past the block's last column
                 rows.append(C[i].sum() + sum(abs(v) for k, v in a.items() if i + k >= W))
@@ -351,9 +372,11 @@ def _left_operator(order, grid, accuracy, kind, weighted=False) -> np.ndarray:
     p = accuracy // 2
     big = W + p + 1
     a = _interior(order, accuracy)
-    hd = np.ones(big); hd[: len(T["h"])] = T["h"]
+    hd = np.ones(big)
+    hd[: len(T["h"])] = T["h"]
     tw = T["t"] if order == 1 else T["t2"]
-    t = np.zeros(big); t[: len(tw)] = tw
+    t = np.zeros(big)
+    t[: len(tw)] = tw
     if order == 1:
         Q = np.zeros((big, big))
         for i in range(big):
@@ -374,7 +397,8 @@ def _left_operator(order, grid, accuracy, kind, weighted=False) -> np.ndarray:
                     M[i, i + k] = -v
         r2 = len(T["M"])
         M[:r2, :r2] = T["M"]
-        d = np.zeros(big); d[: len(T["d"])] = T["d"]
+        d = np.zeros(big)
+        d[: len(T["d"])] = T["d"]
         HA = -M
         if not isinstance(kind, Neumann):
             HA = HA - np.outer(t, d)
@@ -386,13 +410,16 @@ def _left_operator(order, grid, accuracy, kind, weighted=False) -> np.ndarray:
 def _data_vector(order, grid, accuracy, side, cond, weighted=False) -> np.ndarray:
     """Per-unit-value data term of b, or of H b (grid units, length W) at `side`, left-to-right order."""
     T, W = _table(grid, accuracy), _block(grid, accuracy)
-    hd = np.ones(W); hd[: len(T["h"])] = T["h"]
+    hd = np.ones(W)
+    hd[: len(T["h"])] = T["h"]
     tw = T["t"] if order == 1 else T["t2"]
-    t = np.zeros(W); t[: len(tw)] = tw
+    t = np.zeros(W)
+    t[: len(tw)] = tw
     if order == 1 or isinstance(cond, Neumann):
         v, sign = -t, -1.0
     else:
-        d = np.zeros(W); d[: len(T["d"])] = T["d"]
+        d = np.zeros(W)
+        d[: len(T["d"])] = T["d"]
         v, sign = d - T["tau"] * t, 1.0
     if not weighted:
         v = v / hd
@@ -428,8 +455,15 @@ def _weights(nofq, bounds, grid, accuracy, axes, arch, weighted, dtype, device) 
     """What multiplies a 1D factor on the other `axes`: their quadrature weights if weighted, else ones."""
     if not weighted:
         return _ones(nofq, axes, arch, dtype, device)
-    return quadrature_mps([nofq[b] for b in axes], bounds=[bounds[b] for b in axes], grid=[grid[b] for b in axes],
-                          accuracy=accuracy, arch=arch, dtype=dtype, device=device)
+    return quadrature_mps(
+        [nofq[b] for b in axes],
+        bounds=[bounds[b] for b in axes],
+        grid=[grid[b] for b in axes],
+        accuracy=accuracy,
+        arch=arch,
+        dtype=dtype,
+        device=device,
+    )
 
 
 def _corner_mps(v: np.ndarray, nofq: int, side: int, dtype, device) -> MPS:
@@ -469,8 +503,11 @@ def _merge(parts, nofq, arch) -> MPS:
         p = next(i for i, (axes, _) in enumerate(parts) if axis in axes)
         T = parts[p][1][ptr[p]].tensor
         ptr[p] += 1
-        pre, post = math.prod(bonds[:p]), math.prod(bonds[p + 1:])
-        eye = lambda m: torch.eye(m, dtype=T.dtype, device=T.device)
+        pre, post = math.prod(bonds[:p]), math.prod(bonds[p + 1 :])
+
+        def eye(m):
+            return torch.eye(m, dtype=T.dtype, device=T.device)
+
         X = torch.einsum("ab,lsr,cd->alcsbrd", eye(pre), T, eye(post))
         nodes.append(X.reshape(pre * T.shape[0] * post, T.shape[1], pre * T.shape[2] * post))
         bonds[p] = T.shape[2]
@@ -480,7 +517,9 @@ def _merge(parts, nofq, arch) -> MPS:
 def _diag(w: MPS) -> MPS:
     """diag(w) as an MPO, in the MPS form of physical dimension 4 that _merge takes."""
     eye = torch.eye(2, dtype=w[0].tensor.dtype, device=w[0].tensor.device)
-    return list_to_mps([torch.einsum("lsr,st->lstr", n.tensor, eye).reshape(n.shape[0], 4, n.shape[2]) for n in w])
+    return list_to_mps(
+        [torch.einsum("lsr,st->lstr", n.tensor, eye).reshape(n.shape[0], 4, n.shape[2]) for n in w]
+    )
 
 
 def _embed(P: MPO, axis: int, nofq, arch, diags) -> MPO:
@@ -492,8 +531,14 @@ def _embed(P: MPO, axis: int, nofq, arch, diags) -> MPO:
 
 def _hadamard(A: MPS, B: MPS) -> MPS:
     """Elementwise product A * B, uncompressed."""
-    return list_to_mps([torch.einsum("asb,csd->acsbd", p.tensor, q.tensor).reshape(
-        p.shape[0] * q.shape[0], p.shape[1], p.shape[2] * q.shape[2]) for p, q in zip(A, B)])
+    return list_to_mps(
+        [
+            torch.einsum("asb,csd->acsbd", p.tensor, q.tensor).reshape(
+                p.shape[0] * q.shape[0], p.shape[1], p.shape[2] * q.shape[2]
+            )
+            for p, q in zip(A, B)
+        ]
+    )
 
 
 # Exact-rank cutoff, relative to the largest singular value at the bond. The
@@ -511,14 +556,14 @@ def _split(X: torch.Tensor):
     QR keeps every column to its own relative precision, an SVD only to that
     of the largest."""
     U, S, Vh = torch.linalg.svd(X, full_matrices=False)
-    keep = int((S > _RTOL * max(1.0, torch.finfo(X.dtype).eps / _EPS64) * S[0]).sum())
+    keep = int((_RTOL * max(1.0, torch.finfo(X.dtype).eps / _EPS64) * S[0] < S).sum())
     if keep == len(S):
         return torch.linalg.qr(X)
     keep = max(1, keep)
     return U[:, :keep], S[:keep, None] * Vh[:keep]
 
 
-def _compress(net: Union[MPS, MPO]) -> Union[MPS, MPO]:
+def _compress(net: MPS | MPO) -> MPS | MPO:
     """Recompress an MPS or MPO to its exact rank, deterministically, reading no global state.
 
     Sweeps right-to-left, left-to-right, right-to-left, splitting each bond
@@ -533,7 +578,7 @@ def _compress(net: Union[MPS, MPO]) -> Union[MPS, MPO]:
     """
     T = [n.tensor for n in (net.mpo_to_mps() if isinstance(net, MPO) else net)]
     for leftward in (True, False, True):
-        for k in (range(len(T) - 1, 0, -1) if leftward else range(len(T) - 1)):
+        for k in range(len(T) - 1, 0, -1) if leftward else range(len(T) - 1):
             if leftward:  # orthonormal rows in core k, the rest into core k - 1
                 l, s, r = T[k].shape
                 Q, R = _split(T[k].reshape(l, s * r).mT)
@@ -591,8 +636,12 @@ def _face(value, sites, dtype, device):
     """Validated boundary value: a scalar, or an MPS over the other axes (`sites`
     qubits) cast to dtype / device."""
     is_mps = isinstance(value, MPS)
-    if (value[0].tensor.is_complex() if is_mps else np.iscomplexobj(value)) and not dtype.is_complex:
-        raise ValueError(f"complex boundary data needs a complex dtype (e.g. torch.complex128), not {dtype}")
+    if (
+        value[0].tensor.is_complex() if is_mps else np.iscomplexobj(value)
+    ) and not dtype.is_complex:
+        raise ValueError(
+            f"complex boundary data needs a complex dtype (e.g. torch.complex128), not {dtype}"
+        )
     if not is_mps:
         return value
     if not sites:
@@ -601,7 +650,8 @@ def _face(value, sites, dtype, device):
     if len(dims) != sites or any(d != 2 for d in dims):
         raise ValueError(
             f"an MPS boundary value needs one site of physical dimension 2 per qubit of the other "
-            f"axes ({sites} sites), got {len(dims)} sites of dimensions {sorted(set(dims))}")
+            f"axes ({sites} sites), got {len(dims)} sites of dimensions {sorted(set(dims))}"
+        )
     return value.to(device=device, dtype=dtype)
 
 
